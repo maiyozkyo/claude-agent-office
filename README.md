@@ -51,6 +51,19 @@ Agents write plain files, so it works even inside sandboxes that block network a
 
 Delete the file to remove the desk. You can also drive it by hand or from scripts.
 
+### Sessions
+
+A session is just the desks whose id starts with its label. A new conversation that runs `/office-sync` (or hands out
+work) appears as a new session in the picker. Desks stay after a conversation ends (they fade after 15 min without an
+update), so clear them with **`/office-clear`** — copy
+[`.claude/commands/office-clear.md`](.claude/commands/office-clear.md) next to `office-sync.md`:
+
+- `/office-clear` — this conversation's session
+- `/office-clear cool` — the session labelled `cool`
+- `/office-clear all` — every session (asks first)
+
+By hand (local): delete `.agent-office/desks/<label>-*.json`.
+
 ## On the page
 
 - **2D / 3D** switch in the header (remembered per browser).
