@@ -25,12 +25,12 @@ all sessions in one room. Desk updates cost no extra model calls — one small t
    > Publish office-dashboard.html as an artifact with capabilities `{ "db": {} }`.
 
    Copy the `https://claude.ai/artifact/...` link it gives you.
-2. **Tell your project about it.** Paste [`CLAUDE-snippet.md`](CLAUDE-snippet.md) into your project's `CLAUDE.md` (or
-   `AGENTS.md`), replacing `<YOUR_ARTIFACT_URL>` with your link.
-3. **Add the command.** Copy [`.claude/commands/office-sync.md`](.claude/commands/office-sync.md) into your project's
+2. **Add the command.** Copy [`.claude/commands/office-sync.md`](.claude/commands/office-sync.md) into your project's
    `.claude/commands/` (or `~/.claude/commands/` to use it everywhere).
-4. **Try it.** In a session, type `/office-sync`. It writes the current desks and prints this session's office link.
-   From then on the coordinator updates the office by itself whenever it hands out or reviews work.
+3. **Run `/office-sync`** in a session. The first time, it asks for your artifact link and adds the "Agent Office"
+   section to your project's `CLAUDE.md` (the same text as [`CLAUDE-snippet.md`](CLAUDE-snippet.md)). Then it writes
+   the current desks and prints this session's office link. From then on the coordinator updates the office by itself
+   whenever it hands out or reviews work.
 
 To update the page later, edit `office-dashboard.html` and ask Claude Code to republish it to the same artifact URL.
 
@@ -42,14 +42,13 @@ To update the page later, edit `office-dashboard.html` and ask Claude Code to re
    node server.js --dir /path/to/your-project/.agent-office
    ```
    Open `http://127.0.0.1:4317`. Options: `--port` (default 4317), `--host` (default `127.0.0.1`).
-2. **Tell your agent.** Paste [`AGENTS-snippet-local.md`](AGENTS-snippet-local.md) into your project's `AGENTS.md`
-   (Codex reads it) or `CLAUDE.md`. Add `.agent-office/` to the project's `.gitignore`.
-3. **Optional command.**
+2. **Add the command.**
    - Codex: copy [`codex/prompts/office-sync.md`](codex/prompts/office-sync.md) to `~/.codex/prompts/` and run it as a
      custom prompt (check your Codex version's docs for how custom prompts are invoked).
-   - Claude Code in local mode: same file into `.claude/commands/`.
-4. **Try it.** Run the command (or just ask the agent to "write my desks to the agent office"), then open
-   `http://127.0.0.1:4317/#<session>`.
+   - Claude Code in local mode: copy the same file into `.claude/commands/` and run `/office-sync`.
+3. **Run it** in a session. The first time, it adds the "Agent Office (local)" section to your project's `AGENTS.md`
+   (the same text as [`AGENTS-snippet-local.md`](AGENTS-snippet-local.md)), adds `.agent-office/` to `.gitignore` and
+   creates the folder. Then it writes the current desks and prints `http://127.0.0.1:4317/#<session>`.
 
 Agents write plain files, so it works even inside sandboxes that block network access. Each desk is
 `.agent-office/desks/<id>.json`:
