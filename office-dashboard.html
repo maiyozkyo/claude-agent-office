@@ -341,6 +341,7 @@
   }
   .view-3d .pow span { display: inline-block; animation: powPop 0.4s ease-out; }
   @keyframes powPop { 0% { transform: scale(0.4) rotate(-12deg); } 60% { transform: scale(1.25) rotate(6deg); } 100% { transform: scale(1) rotate(0deg); } }
+  .view-3d .pow.zap { color: #eafcff; -webkit-text-stroke: 1.5px #1b7fb8; text-shadow: 0 0 6px #4fc3f7, 0 2px 0 #1b7fb8; }
 
   .view-3d .empty-office {
     position: absolute;
@@ -1021,6 +1022,24 @@
     100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)); }
   }
 
+  /* ---- taser zap (2D, cheap): the desk flickers blue / white, hair stands up, "ZZZT!" ---- */
+  .view-2d .desk.zapped .char { animation: zapJitter 0.09s steps(2) infinite; }
+  .view-2d .desk.zapped .char-body { animation: zapFlash 0.18s steps(1) infinite; }
+  .view-2d .desk.zapped .arm { animation: none; }
+  .view-2d .desk.zapped .arm.left { transform: rotate(55deg); }
+  .view-2d .desk.zapped .arm.right { transform: rotate(-55deg); }
+  .view-2d .desk.zapped .hair-cap { transform: scaleY(1.45); transform-origin: 50% 100%; }
+  @keyframes zapJitter { 0% { transform: translate(-1.5px, 0); } 50% { transform: translate(1.5px, -1px); } }
+  @keyframes zapFlash {
+    0% { filter: brightness(2.1) drop-shadow(0 0 4px #bfeaff); }
+    50% { filter: sepia(1) hue-rotate(170deg) saturate(3) drop-shadow(0 0 6px #4fc3f7); }
+  }
+  .view-2d .bubble.zap { background: #e6f7ff; border-color: #7fd0f5; color: #1b7fb8; font-weight: 800; animation: outburstPop 0.3s ease-out; }
+  :root[data-theme="dark"] .view-2d .bubble.zap { background: #16324a; border-color: #2c6a94; color: #9fe0ff; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .view-2d .bubble.zap { background: #16324a; border-color: #2c6a94; color: #9fe0ff; }
+  }
+
   /* ---- session picker ---- */
   .session-picker {
     font: 700 0.72rem "Nunito", sans-serif;
@@ -1147,6 +1166,10 @@
     background: var(--accent); color: #fff; cursor: pointer;
   }
   .office-name-field { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--muted); margin: 0 0 10px; }
+  .zap-settings { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; background: var(--bg); }
+  .zap-field { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.72rem; color: var(--muted); }
+  .zap-field input[type="number"] { width: 56px; font-size: 0.78rem; padding: 3px 6px; border-radius: 8px; border: 1px solid var(--paper-edge); background: var(--paper); color: var(--ink); }
+  .zap-field input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
   .office-name-field input { flex: 1 1 auto; min-width: 0; font-size: 0.78rem; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--paper-edge); background: var(--bg); color: var(--ink); }
 </style>
 
@@ -1202,7 +1225,7 @@
       <div class="labels" id="labels"></div>
       <div class="empty-office" id="empty-msg" hidden>Nobody's at a desk right now.</div>
       <div class="hint">Drag to look around · scroll to zoom · right-click someone</div>
-      <div class="ctx-menu" id="ctx-menu" hidden><button type="button" id="ctx-punch" title="Punch" aria-label="Punch">👊</button><button type="button" class="gang" id="ctx-gang" title="Gang punch" aria-label="Gang punch">👊👊</button><button type="button" id="ctx-paper" title="Throw paper" aria-label="Throw paper">📄</button></div>
+      <div class="ctx-menu" id="ctx-menu" hidden><button type="button" id="ctx-punch" title="Punch" aria-label="Punch">👊</button><button type="button" class="gang" id="ctx-gang" title="Gang punch" aria-label="Gang punch">👊👊</button><button type="button" id="ctx-paper" title="Throw paper" aria-label="Throw paper">📄</button><button type="button" id="ctx-zap" title="Zap" aria-label="Zap">⚡</button></div>
       <div class="pick-hint" id="pick-hint" hidden>Pick who to punch · Esc to cancel</div>
     </div>
   </div>
@@ -1215,6 +1238,10 @@
 
     <label class="office-name-field">Office name <input type="text" id="office-name-input" maxlength="40" placeholder="Agent Office"></label>
     <p class="names-hint">"default" sets how many idle desks show for a role before any real work is dispatched (0 hides it). Give each role a list of names, in order — the 1st Dev desk gets the 1st name, and so on. Pick a gender (M/F), a hairstyle, and hair/shirt colors per name. Saved only in this browser.</p>
+    <div class="zap-settings">
+      <label class="zap-field">Auto-zap slow workers after <input type="number" id="autozap-min-input" min="0" max="240" step="1" value="10"> min (0 = off)</label>
+      <label class="zap-field"><input type="checkbox" id="zap-sleepers-input" checked> Zap sleepers at random</label>
+    </div>
     <div class="names-grid" id="names-grid"></div>
 </aside>
 
@@ -1702,6 +1729,27 @@
       return new THREE.CanvasTexture(cv);
     })(), transparent: true, depthWrite: false });
     var RAGE_SKIN = new THREE.Color('#ff4a2e');
+    // taser zap: baton parts, electric arcs, contact glow, sparks, smoke
+    FX.taserBand = new THREE.MeshBasicMaterial({ color: 0xffd23a });
+    FX.taserTip = new THREE.MeshBasicMaterial({ color: 0xdfe8f5 });
+    FX.arc = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
+    FX.zapGlow = new THREE.SpriteMaterial({ map: (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 64;
+      var ctx = cv.getContext('2d');
+      var g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.3, 'rgba(150,230,255,0.8)');
+      g.addColorStop(1, 'rgba(60,160,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(cv);
+    })(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
+    FX.spark = new THREE.PointsMaterial({ color: 0xfff2a0, size: 0.07, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false });
+    FX.smoke = new THREE.MeshBasicMaterial({ color: 0x8d93a6, transparent: true, opacity: 0.6, depthWrite: false });
+    var REDUCE_MOTION = false; // animation always on (user preference), even with the OS reduce-motion setting
     FX.zzz = new THREE.SpriteMaterial({ map: (function () {
       var cv = document.createElement('canvas');
       cv.width = 64; cv.height = 64;
@@ -2103,23 +2151,24 @@
         stars.add(star);
       }
 
-      // hair
+      // hair (in its own group so a taser zap can make it stand on end)
+      var hg = new THREE.Group(); face.add(hg);
       var hairTop = 0.12;
       var style = HAIR_STYLES.indexOf(it.hairStyle) >= 0 ? it.hairStyle : 'cap';
       if (style === 'cap') {
-        var cap = mesh(G.cap, m.hair, face); cap.position.y = 0.02; cap.rotation.x = -0.38;
+        var cap = mesh(G.cap, m.hair, hg); cap.position.y = 0.02; cap.rotation.x = -0.38;
       } else if (style === 'swept') {
-        var cap2 = mesh(G.cap, m.hair, face); cap2.position.y = 0.03; cap2.rotation.x = -0.42;
-        var fr = mesh(G.fringe, m.hair, face); fr.position.set(-0.1, 0.17, 0.27); fr.rotation.set(0.5, 0, 1.15); fr.scale.set(1, 1, 0.45);
-        var fr2 = mesh(G.fringe, m.hair, face); fr2.position.set(0.06, 0.24, 0.25); fr2.rotation.set(0.6, 0, 1.3); fr2.scale.set(0.8, 0.9, 0.45);
+        var cap2 = mesh(G.cap, m.hair, hg); cap2.position.y = 0.03; cap2.rotation.x = -0.42;
+        var fr = mesh(G.fringe, m.hair, hg); fr.position.set(-0.1, 0.17, 0.27); fr.rotation.set(0.5, 0, 1.15); fr.scale.set(1, 1, 0.45);
+        var fr2 = mesh(G.fringe, m.hair, hg); fr2.position.set(0.06, 0.24, 0.25); fr2.rotation.set(0.6, 0, 1.3); fr2.scale.set(0.8, 0.9, 0.45);
       } else if (style === 'undercut') {
-        var cap3 = mesh(G.capShort, m.hair, face); cap3.position.y = 0.06; cap3.rotation.x = -0.15;
-        var ring = mesh(G.ring, m.hairDark, face); ring.position.y = 0.2; ring.rotation.x = PI / 2 - 0.15;
+        var cap3 = mesh(G.capShort, m.hair, hg); cap3.position.y = 0.06; cap3.rotation.x = -0.15;
+        var ring = mesh(G.ring, m.hairDark, hg); ring.position.y = 0.2; ring.rotation.x = PI / 2 - 0.15;
       } else if (style === 'bald') {
-        var shine = mesh(G.shine, m.shine, face); shine.position.set(-0.08, 0.29, 0.13); shine.scale.set(1, 0.4, 0.75); shine.rotation.x = -0.5;
+        var shine = mesh(G.shine, m.shine, hg); shine.position.set(-0.08, 0.29, 0.13); shine.scale.set(1, 0.4, 0.75); shine.rotation.x = -0.5;
       } else if (style === 'hkt') {
         // tall boy-band spikes: a short base and a crown of cones standing up and out
-        var cap4 = mesh(G.capHkt, m.hair, face); cap4.position.y = 0.04; cap4.rotation.x = -0.2;
+        var cap4 = mesh(G.capHkt, m.hair, hg); cap4.position.y = 0.04; cap4.rotation.x = -0.2;
         var up = new THREE.Vector3(0, 1, 0);
         var spikes = [[0, 0, 1.35]];
         for (var s = 0; s < 6; s++) spikes.push([0.55, s * PI / 3 + PI / 6, s % 2 ? 1.0 : 1.15]);
@@ -2128,7 +2177,7 @@
           var a = sp[0], b = sp[1];
           var p = new THREE.Vector3(Math.sin(a) * Math.sin(b), Math.cos(a), Math.sin(a) * Math.cos(b)).multiplyScalar(0.3);
           var dir = p.clone().normalize().add(new THREE.Vector3(0, 0.9, 0)).normalize();
-          var cone = mesh(G.spike, k % 3 === 2 ? m.hairDark : m.hair, face);
+          var cone = mesh(G.spike, k % 3 === 2 ? m.hairDark : m.hair, hg);
           cone.position.copy(p).add(new THREE.Vector3(0, 0.04, 0));
           cone.quaternion.setFromUnitVectors(up, dir);
           cone.scale.set(1, sp[2], 1);
@@ -2136,17 +2185,17 @@
         hairTop = 0.62;
       } else if (style === 'buzz') {
         // đầu đinh: a thin flat-top shell close to the scalp
-        var bz = mesh(G.capBuzz, m.hair, face); bz.position.y = 0.0; bz.rotation.x = -0.2; bz.scale.set(1.0, 0.92, 1.0);
+        var bz = mesh(G.capBuzz, m.hair, hg); bz.position.y = 0.0; bz.rotation.x = -0.2; bz.scale.set(1.0, 0.92, 1.0);
         hairTop = 0.04;
       } else if (style === 'mohawk') {
         // one strip of spikes front-to-back, shaved sides
-        var mb = mesh(G.capBuzz, m.hairDark, face); mb.position.y = 0.0; mb.rotation.x = -0.2; mb.scale.set(0.3, 1.06, 1.02);
+        var mb = mesh(G.capBuzz, m.hairDark, hg); mb.position.y = 0.0; mb.rotation.x = -0.2; mb.scale.set(0.3, 1.06, 1.02);
         var mUp = new THREE.Vector3(0, 1, 0);
         for (var mk = 0; mk < 6; mk++) {
           var ma = 0.85 - mk * 0.4;   // +z (front) → back
           var mp = new THREE.Vector3(0, Math.cos(ma), Math.sin(ma)).multiplyScalar(0.3);
           var md = mp.clone().normalize().add(new THREE.Vector3(0, 0.6, 0)).normalize();
-          var mc = mesh(G.spike, m.hair, face);
+          var mc = mesh(G.spike, m.hair, hg);
           mc.position.copy(mp).add(new THREE.Vector3(0, 0.03, 0));
           mc.quaternion.setFromUnitVectors(mUp, md);
           mc.scale.set(0.7, mk === 1 || mk === 2 ? 1.15 : 0.9, 0.7);
@@ -2154,13 +2203,13 @@
         hairTop = 0.45;
       } else if (style === 'topknot') {
         // búi samurai: slicked back + a bun with a tie band
-        var tk = mesh(G.cap, m.hair, face); tk.position.y = 0.02; tk.rotation.x = -0.3; tk.scale.setScalar(0.98);
-        var bun = mesh(G.bun, m.hair, face); bun.position.set(0, 0.42, -0.06);
-        var tie = mesh(G.tie, m.ink, face); tie.position.set(0, 0.31, -0.05); tie.rotation.x = PI / 2;
+        var tk = mesh(G.cap, m.hair, hg); tk.position.y = 0.02; tk.rotation.x = -0.3; tk.scale.setScalar(0.98);
+        var bun = mesh(G.bun, m.hair, hg); bun.position.set(0, 0.42, -0.06);
+        var tie = mesh(G.tie, m.ink, hg); tie.position.set(0, 0.31, -0.05); tie.rotation.x = PI / 2;
         hairTop = 0.32;
       } else if (style === 'afro') {
         // big round fluffy volume: a large dome plus lumps on its surface
-        var af = mesh(G.afro, m.hair, face); af.position.set(0, 0.08, -0.06); af.rotation.x = -0.62;
+        var af = mesh(G.afro, m.hair, hg); af.position.set(0, 0.08, -0.06); af.rotation.x = -0.62;
         [[0.45, 0], [0.45, 1.05], [0.45, 2.1], [0.45, 3.15], [0.45, 4.2], [0.45, 5.25],
          [1.25, PI * 0.6], [1.25, PI], [1.25, PI * 1.4]].forEach(function (d) {
           var pb = mesh(G.afroPuff, m.hair, af);
@@ -2169,25 +2218,25 @@
         hairTop = 0.38;
       } else if (style === 'curly') {
         // xoăn mì tôm: a cap covered with small curls (none over the face)
-        var cu = mesh(G.cap, m.hair, face); cu.position.y = 0.01; cu.rotation.x = -0.38; cu.scale.setScalar(0.97);
+        var cu = mesh(G.cap, m.hair, hg); cu.position.y = 0.01; cu.rotation.x = -0.38; cu.scale.setScalar(0.97);
         [[0.15, 4], [0.65, 7], [1.1, 8]].forEach(function (ring, ri) {
           for (var ci = 0; ci < ring[1]; ci++) {
             var cb = ci / ring[1] * PI * 2 + ri * 0.4;
             var front = Math.cos(cb) > 0.45 && ring[0] > 1;
             if (front) continue;
-            var cm = mesh(G.curl, ci % 2 ? m.hairDark : m.hair, face);
+            var cm = mesh(G.curl, ci % 2 ? m.hairDark : m.hair, hg);
             cm.position.set(Math.sin(ring[0]) * Math.sin(cb), Math.cos(ring[0]), Math.sin(ring[0]) * Math.cos(cb)).multiplyScalar(0.36);
             cm.position.y += 0.03;
           }
         });
         hairTop = 0.1;
       } else if (style === 'ponytail') {
-        var pc = mesh(G.cap, m.hair, face); pc.position.y = 0.02; pc.rotation.x = -0.34;
+        var pc = mesh(G.cap, m.hair, hg); pc.position.y = 0.02; pc.rotation.x = -0.34;
         var tailPivot = new THREE.Group(); tailPivot.position.set(0, 0.12, -0.3); face.add(tailPivot);
         var tl = mesh(G.tail, m.hair, tailPivot); tl.rotation.x = 0.35;
         var tt = mesh(G.tie, m.ink, tailPivot); tt.scale.setScalar(0.7); tt.rotation.x = PI / 2 - 0.35;
       } else if (style === 'braids') {
-        var bc = mesh(G.cap, m.hair, face); bc.position.y = 0.02; bc.rotation.x = -0.38;
+        var bc = mesh(G.cap, m.hair, hg); bc.position.y = 0.02; bc.rotation.x = -0.38;
         var braids = [];
         [-1, 1].forEach(function (sx) {
           var bp = new THREE.Group(); bp.position.set(sx * 0.31, -0.02, -0.07); face.add(bp);
@@ -2201,18 +2250,30 @@
         });
       } else if (style === 'balding') {
         // hói giữa: shiny crown, hair only on the sides and back
-        var bs = mesh(G.shine, m.shine, face); bs.position.set(-0.06, 0.29, 0.1); bs.scale.set(1.1, 0.4, 0.8); bs.rotation.x = -0.5;
-        var sr = mesh(G.sideRing, m.hair, face); sr.position.y = 0.05; sr.rotation.set(PI / 2, 0, PI * 0.8);
+        var bs = mesh(G.shine, m.shine, hg); bs.position.set(-0.06, 0.29, 0.1); bs.scale.set(1.1, 0.4, 0.8); bs.rotation.x = -0.5;
+        var sr = mesh(G.sideRing, m.hair, hg); sr.position.y = 0.05; sr.rotation.set(PI / 2, 0, PI * 0.8);
         hairTop = 0.02;
       } else if (style === 'bowl') {
         // mái ngố: level bowl with a blunt fringe over the forehead
-        var bw = mesh(G.bowl, m.hair, face); bw.position.y = 0.07; bw.scale.set(1.04, 1, 1.04);
+        var bw = mesh(G.bowl, m.hair, hg); bw.position.y = 0.07; bw.scale.set(1.04, 1, 1.04);
         hairTop = 0.12;
       }
       if (it.gender === 'f' && !NO_SIDE_LOCKS[style]) {
         var lockL = mesh(G.lock, m.hair, face); lockL.position.set(-0.33, -0.16, -0.04); lockL.rotation.z = -0.08;
         var lockR = mesh(G.lock, m.hair, face); lockR.position.set(0.33, -0.16, -0.04); lockR.rotation.z = 0.08;
         var backHair = mesh(G.box, m.hair, face); backHair.scale.set(0.56, 0.5, 0.1); backHair.position.set(0, -0.12, -0.27);
+      }
+
+      // the boss's stun baton: hidden in the right hand, shown only while zapping
+      var taser = null, taserTip = null;
+      if (it.canon === 'PM') {
+        taser = new THREE.Group(); taser.position.y = -0.37; taser.visible = false; armR.add(taser);
+        var tzb = mesh(G.box, m.ink, taser); tzb.scale.set(0.075, 0.2, 0.06); tzb.position.y = -0.1;
+        var tzs = mesh(G.box, FX.taserBand, taser); tzs.scale.set(0.08, 0.035, 0.065); tzs.position.y = -0.04;
+        [-0.024, 0.024].forEach(function (tx) {
+          var tp = mesh(G.box, FX.taserTip, taser); tp.scale.set(0.014, 0.05, 0.014); tp.position.set(tx, -0.22, 0);
+        });
+        taserTip = new THREE.Object3D(); taserTip.position.y = -0.25; taser.add(taserTip);
       }
 
       var exclMat = new THREE.SpriteMaterial({ map: exclTex, transparent: true, depthTest: false });
@@ -2270,7 +2331,10 @@
         // paper ball reaction, boss-patrol fake typing, clapping
         annoyedUntil: -1, annoyedFace: 0, rubUntil: -1, throwAt: -9,
         fakeUntil: -1, clapUntil: -1, screenDirty: false,
-        baseText: '', baseCls: 'bubble', overText: ''
+        baseText: '', baseCls: 'bubble', overText: '',
+        // taser zap: hair group, flashing materials, the boss's baton
+        hairGrp: hg, zapMats: [m.headSkin, m.skin, m.shirt], zapGlowHex: 0, zapBy: null,
+        taser: taser, taserTip: taserTip
       };
       body.userData.unit = u;
       setFace(u, 'normal');
@@ -2289,23 +2353,37 @@
     }
 
     // face modes: 'normal' smile, 'rage' (unibrow, squint, gritted teeth, red cheeks), 'dizzy' (X eyes, frown),
-    // 'sleep' (closed-eye lines)
+    // 'sleep' (closed-eye lines), 'zapped' (X eyes, chattering teeth, blue cheeks),
+    // 'smug' (half-lidded eyes, lopsided smirk — the boss with the taser)
     function setFace(u, mode) {
       if (u.faceMode === mode) return;
       u.faceMode = mode;
       var rage = mode === 'rage', dizzy = mode === 'dizzy', sleep = mode === 'sleep';
+      var zapped = mode === 'zapped', smug = mode === 'smug', xe = dizzy || zapped;
       u.browL.visible = u.browR.visible = rage;
-      u.teeth.visible = rage;
-      u.mouth.visible = !rage;
-      u.xEyes.visible = dizzy;
-      u.eyeL.visible = u.eyeR.visible = !dizzy;
-      var ey = rage ? 0.35 : (sleep ? 0.12 : 1.15);
-      u.eyeL.scale.set(sleep ? 1.4 : 1.05, ey, 0.5); u.eyeR.scale.set(sleep ? 1.4 : 1.05, ey, 0.5);
-      u.eyeL.position.y = u.eyeR.position.y = rage ? -0.03 : (sleep ? -0.03 : -0.01);
-      u.mouth.rotation.z = dizzy ? 0 : PI;          // arc up = frown, flipped = smile
+      u.teeth.visible = rage || zapped;
+      u.mouth.visible = !rage && !zapped;
+      u.xEyes.visible = xe;
+      u.eyeL.visible = u.eyeR.visible = !xe;
+      var ey = rage ? 0.35 : (sleep ? 0.12 : (smug ? 0.42 : 1.15));
+      var ex = sleep ? 1.4 : (smug ? 1.3 : 1.05);
+      u.eyeL.scale.set(ex, ey, 0.5); u.eyeR.scale.set(ex, ey, 0.5);
+      u.eyeL.position.y = u.eyeR.position.y = rage || sleep ? -0.03 : (smug ? -0.022 : -0.01);
+      u.mouth.rotation.z = dizzy ? 0 : (smug ? PI + 0.35 : PI);   // arc up = frown, flipped = smile
+      u.mouth.position.x = smug ? 0.04 : 0;
       u.mouth.position.y = dizzy ? -0.16 : -0.11;
-      u.cheekMat.color.set(rage || dizzy ? '#ff5c4d' : '#ffb199');
+      u.cheekMat.color.set(rage || dizzy ? '#ff5c4d' : (zapped ? '#8fd3ff' : '#ffb199'));
       u.stars.visible = dizzy;
+    }
+
+    // zap flash: emissive white / blue on skin + shirt (0 = off, restoring the pick highlight)
+    function setZapGlow(u, hex) {
+      if (u.zapGlowHex === hex) return;
+      u.zapGlowHex = hex;
+      for (var i = 0; i < u.zapMats.length; i++) {
+        var mt = u.zapMats[i];
+        mt.emissive.setHex(hex || (u.highlighted && u.hlMats.indexOf(mt) >= 0 ? 0x664422 : 0));
+      }
     }
 
     function setHighlight(u, on) {
@@ -2519,7 +2597,8 @@
       var clapping = u.clapUntil > T && !u.fight;
       var annoyed = u.annoyedUntil > T && !u.fight;  // just hit by a paper ball
       // dozing: any idle desk (real or placeholder) with nothing else going on falls asleep almost at once
-      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed &&
+      var zapped = !!u.zapBy;                         // a taser zap is running through this one
+      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed && !zapped &&
         T >= (u.hitUntil || -1) + 0.7 && T - u.throwAt >= 0.55;
       if (quiet) {
         u.idleT += dt;
@@ -2613,8 +2692,16 @@
           lZ = rZ = -0.05;
           lunge = Math.abs(js) * 0.09;
           bob = Math.abs(js) * 0.02;
+        } else if (f.phase === 'zap') {   // baton held out at the target, a little buzz in the wrist
+          rX = -1.45 + Math.sin(f.t * 40) * 0.04; rZ = 0.12;
+          lX = -0.2; lZ = 0.18;
+          lunge = 0.05;
         }
       }
+      if (zapped && !f) {   // being zapped: arms flung out stiff, head straight
+        lX = rX = -0.55; lZ = rZ = 0.75; headX = 0; headY = 0; exclOn = false;
+      }
+      var zapping = !!(f && f.zap && f.phase !== 'sit');
       var sinceStartle = T - u.startleAt;
       if (sinceStartle < 0.6) {   // woken with a start: a little jump and a "!"
         bob += Math.sin(sinceStartle / 0.6 * PI) * 0.14;
@@ -2637,15 +2724,16 @@
       P.rotY += dr * (1 - Math.exp(-dt * 10));
 
       // rage blend (outburst or attacking): red skin, flames, head shake
-      var rageT = (u.outburstOn || (f && f.phase !== 'sit' && !f.patrol)) ? 1 : 0;
+      var rageT = ((u.outburstOn && !zapping) || (f && f.phase !== 'sit' && !f.patrol && !f.zap)) ? 1 : 0;
       u.rage += (rageT - u.rage) * (1 - Math.exp(-dt * 10));
       if (Math.abs(u.rage - (u.rageApplied || 0)) > 0.004) {
         u.rageApplied = u.rage;
         u.headSkin.color.copy(u.skinBase).lerp(RAGE_SKIN, u.rage * 0.85);
       }
       var dizzy = T < (u.hitUntil || -1) + 0.7;
-      setFace(u, dizzy ? 'dizzy' : (u.rage > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')));
-      setOverText(u, annoyed ? '?!' : '');
+      setFace(u, zapped ? 'zapped' : (dizzy ? 'dizzy' : (zapping ? 'smug' :
+        (u.rage > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')))));
+      setOverText(u, annoyed ? '?!' : (f && f.zap && f.phase === 'zap' ? f.say : ''));
       if (u.dozing !== u.zzz.visible) u.zzz.visible = u.dozing;
       if (u.dozing) {
         for (var zk = 0; zk < 3; zk++) {
@@ -2687,6 +2775,25 @@
         u.body.position.set(P.xOff + u.hitDX * rec, hipY, P.stand * 0.06 + u.hitDZ * rec);
       }
       u.body.rotation.y = P.rotY;
+      if (zapped) {   // electrocuted: the whole body rattles, skin strobes white / blue, hair stands up
+        var ja = REDUCE_MOTION ? 0.25 : 1;
+        u.body.position.x += (Math.random() - 0.5) * 0.07 * ja;
+        u.body.position.y += Math.random() * 0.04 * ja;
+        u.body.position.z += (Math.random() - 0.5) * 0.05 * ja;
+        u.body.rotation.z = (Math.random() - 0.5) * 0.14 * ja;
+        var fl = ((T * (REDUCE_MOTION ? 5 : 16)) | 0) % 3;
+        setZapGlow(u, fl === 0 ? 0xc8efff : (fl === 1 ? 0x2a6cff : 0));
+      } else {
+        if (u.body.rotation.z) u.body.rotation.z = 0;
+        if (u.zapGlowHex) setZapGlow(u, 0);
+      }
+      var hgs = u.hairGrp.scale.y;
+      if (zapped || hgs !== 1) {
+        var hgT = zapped ? 1.6 + Math.random() * 0.15 * (REDUCE_MOTION ? 0 : 1) : 1;
+        hgs += (hgT - hgs) * (1 - Math.exp(-dt * (zapped ? 25 : 2.5)));
+        if (!zapped && Math.abs(hgs - 1) < 0.01) hgs = 1;
+        u.hairGrp.scale.set(1 + (hgs - 1) * 0.2, hgs, 1 + (hgs - 1) * 0.2);
+      }
       var legRot = -PI / 2 * (1 - P.stand);
       var swing = walk ? Math.sin(f.wc) * 0.6 : 0;
       u.legL.rotation.x = legRot + swing; u.legR.rotation.x = legRot - swing;
@@ -2794,7 +2901,7 @@
       var a = [];
       for (var i = 0; i < unitList.length; i++) {
         var u = unitList[i];
-        if (u !== tgt && !u.dead && !u.fight) a.push(u);
+        if (u !== tgt && !u.dead && !u.fight && !u.zapBy) a.push(u);
       }
       return a;
     }
@@ -2844,6 +2951,8 @@
       var i = fights.indexOf(f);
       if (i >= 0) fights.splice(i, 1);
       removePow(f);
+      stopZapFx(f);
+      if (zapFight === f) zapFight = null;
       if (f.att.fight === f) {
         f.att.fight = null;
         f.att.p.xOff = 0;
@@ -2851,9 +2960,10 @@
     }
     function goBack(f) {
       removePow(f);
+      stopZapFx(f);
       if (f.phase === 'wait') { endFight(f); return; }   // never got up
       if (f.phase === 'out') { f.phase = 'back'; f.idx = Math.max(0, f.idx - 1); }
-      else if (f.phase === 'punch') { f.phase = 'back'; f.idx = Math.max(0, f.n - 2); }
+      else if (f.phase === 'punch' || f.phase === 'zap') { f.phase = 'back'; f.idx = Math.max(0, f.n - 2); }
       else if (f.phase === 'stand') { f.phase = 'sit'; }
       f.t = 0;
     }
@@ -2896,7 +3006,7 @@
           if (walkToward(f, f.path[f.idx], dt)) {
             if (f.idx >= f.n - 1) {
               if (f.patrol) { f.phase = 'sit'; f.t = 0; }   // the route ends back at the seat
-              else if (f.tgt) { f.phase = 'punch'; f.t = 0; } else goBack(f);
+              else if (f.tgt) { f.phase = f.zap ? 'zap' : 'punch'; f.t = 0; } else goBack(f);
             } else f.idx++;
           }
         } else if (f.phase === 'back') {
@@ -2932,6 +3042,31 @@
               f.pow.appendChild(sp);
             }
             if (f.t > f.punchDur) goBack(f);
+          }
+        } else if (f.phase === 'zap') {
+          if (!f.tgt) { goBack(f); }
+          else {
+            var zt = f.tgt, ztp = zt.root.position;
+            f.face = Math.atan2(ztp.x + zt.p.xOff - f.pos.x, ztp.z - f.pos.z);
+            if (!f.zapOn) startZapFx(f);
+            wake(zt);   // a dozing target jolts awake (startle jump + "!")
+            f.arcT -= dt;
+            if (f.arcT <= 0) { f.arcT = 0.05; drawArcs(f); }
+            f.powT += dt;
+            if (f.powT > 0.5) {
+              f.powT = 0;
+              f.powI++;
+              var zsp = document.createElement('span');
+              zsp.textContent = ZAPS[f.powI % ZAPS.length];
+              f.pow.textContent = '';
+              f.pow.appendChild(zsp);
+            }
+            if (f.t > f.punchDur) {   // done: smoke + sparks, the target sits back dazed
+              zapBurst(zt);
+              zt.hitUntil = T + 0.35;
+              zt.hitAmt = 0;
+              goBack(f);
+            }
           }
         } else if (f.phase === 'sit') {
           f.pos.x = f.path[0].x; f.pos.z = f.path[0].z;
@@ -2993,6 +3128,174 @@
         var dx = rp.x - f.pos.x, dz = rp.z - f.pos.z;
         if (Math.abs(rp.y - f.pos.y) < 0.6 && dx * dx + dz * dz < PATROL_NEAR2) u.fakeUntil = T + 1.0;
       }
+    }
+
+    /* ---- taser zap: the boss walks over and zaps one desk (one zap at a time, purely visual) ---- */
+    var zapFight = null;
+    var ZAP_DUR = 2.0;
+    var ZAPS = ['ZZZT!', 'BZZT!', 'KRZZK!'];
+    var ARC_N = 3, ARC_SEG = 7;
+    var arcPos = new Float32Array(ARC_N * ARC_SEG * 2 * 3);
+    var arcCol = new Float32Array(ARC_N * ARC_SEG * 2 * 3);
+    for (var ac = 0; ac < ARC_N * ARC_SEG * 2; ac++) {   // arc 0 white-hot core, the others cyan
+      var core = ac < ARC_SEG * 2;
+      arcCol[ac * 3] = core ? 1 : 0.35; arcCol[ac * 3 + 1] = core ? 1 : 0.9; arcCol[ac * 3 + 2] = 1;
+    }
+    var arcGeo = new THREE.BufferGeometry();
+    arcGeo.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+    arcGeo.setAttribute('color', new THREE.BufferAttribute(arcCol, 3));
+    var arcLine = new THREE.LineSegments(arcGeo, FX.arc);
+    arcLine.frustumCulled = false;
+    arcLine.visible = false;
+    arcLine.renderOrder = 5;
+    scene.add(arcLine);
+    var zapGlowSpr = new THREE.Sprite(FX.zapGlow);
+    zapGlowSpr.visible = false;
+    zapGlowSpr.renderOrder = 6;
+    scene.add(zapGlowSpr);
+    var SPARK_N = 14;
+    var sparkPos = new Float32Array(SPARK_N * 3), sparkVel = new Float32Array(SPARK_N * 3);
+    var sparkGeo = new THREE.BufferGeometry();
+    sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+    var sparks = new THREE.Points(sparkGeo, FX.spark);
+    sparks.frustumCulled = false;
+    sparks.visible = false;
+    scene.add(sparks);
+    var smokePuffs = [];
+    for (var sp0 = 0; sp0 < 3; sp0++) {
+      var smk = new THREE.Mesh(G.puff, FX.smoke);
+      smk.visible = false;
+      scene.add(smk);
+      smokePuffs.push(smk);
+    }
+    var zapFxLife = 0, ZAP_FX_LIFE = 1.1;
+    var zapA = new THREE.Vector3(), zapB = new THREE.Vector3(), zapC = new THREE.Vector3();
+
+    function bossUnit() {
+      for (var i = 0; i < unitList.length; i++) if (unitList[i].canon === 'PM' && !unitList[i].dead) return unitList[i];
+      return null;
+    }
+    // why the ⚡ menu item is off for this target ('' = can zap now)
+    function zapBlockReason(u) {
+      if (!u || u.dead) return 'Gone';
+      if (u.canon === 'PM') return 'The boss won\'t zap the boss';
+      var pm = bossUnit();
+      if (!pm) return 'No boss in the office';
+      if (u.zapBy) return 'Already being zapped';
+      if (zapFight) return 'The boss is already zapping someone';
+      if (pm.fight) return 'The boss is busy';
+      if (u.fight) return 'Busy fighting';
+      if (!roomDims.W) return 'Not ready';
+      return '';
+    }
+    function startZap(u, kind) {
+      if (zapBlockReason(u)) return null;
+      var pm = bossUnit();
+      var f = startFight(pm, u);
+      if (!f) return null;
+      f.zap = true; f.zt = u; f.zapOn = false; f.arcT = 0;
+      f.punchDur = ZAP_DUR; f.powX = 0.25; f.powY = 0.1;
+      f.say = kind === 'slow' ? '⚡ Faster!' : (kind === 'sleep' ? '⚡ Wake up!' : '⚡ Bzzt!');
+      wake(pm);
+      zapFight = f;
+      return f;
+    }
+    // auto zap from the page: 'started' | 'busy' (try again later) | 'gone' (drop it)
+    function tryZap(id, kind) {
+      var u = units[id];
+      if (!u || u.dead || u.canon === 'PM' || !bossUnit()) return 'gone';
+      if (!active || document.hidden) return 'busy';
+      return startZap(u, kind) ? 'started' : 'busy';
+    }
+    function startZapFx(f) {
+      f.zapOn = true;
+      if (f.att.taser) f.att.taser.visible = true;
+      f.tgt.zapBy = f;
+      arcLine.visible = true;
+      zapGlowSpr.visible = true;
+      f.arcT = 0;
+      f.powT = 1;
+      if (!f.pow) {
+        f.pow = document.createElement('div');
+        f.pow.className = 'pow zap';
+        f.pow.style.zIndex = 20000;
+        labelsLayer.appendChild(f.pow);
+      }
+    }
+    function stopZapFx(f) {
+      if (!f.zap) return;
+      if (f.att.taser) f.att.taser.visible = false;
+      var tg = f.zt;
+      if (tg && tg.zapBy === f) { tg.zapBy = null; setZapGlow(tg, 0); if (tg.body.rotation.z) tg.body.rotation.z = 0; }
+      if (f.zapOn) { arcLine.visible = false; zapGlowSpr.visible = false; }
+      f.zapOn = false;
+    }
+    // re-randomized every ~50 ms: three jagged arcs from the baton tip to the target's chest / head
+    function drawArcs(f) {
+      var tip = f.att.taserTip;
+      if (tip) { zapA.set(0, 0, 0); tip.localToWorld(zapA); }
+      else { zapA.set(0, 0.8, 0); f.att.body.localToWorld(zapA); }
+      zapB.set(0, 0.3, 0); f.tgt.body.localToWorld(zapB);
+      var j = 0;
+      for (var a = 0; a < ARC_N; a++) {
+        var ex = a ? (Math.random() - 0.5) * 0.35 : 0, ey = a ? (Math.random() - 0.2) * 0.45 : 0, ez = a ? (Math.random() - 0.5) * 0.25 : 0;
+        var amp = a ? 0.1 : 0.07;
+        var px = zapA.x, py = zapA.y, pz = zapA.z;
+        for (var s = 1; s <= ARC_SEG; s++) {
+          var k = s / ARC_SEG, w = Math.sin(k * PI) * amp;
+          var nx = zapA.x + (zapB.x + ex - zapA.x) * k, ny = zapA.y + (zapB.y + ey - zapA.y) * k, nz = zapA.z + (zapB.z + ez - zapA.z) * k;
+          if (s < ARC_SEG) { nx += (Math.random() - 0.5) * 2 * w; ny += (Math.random() - 0.5) * 2 * w; nz += (Math.random() - 0.5) * 2 * w; }
+          arcPos[j++] = px; arcPos[j++] = py; arcPos[j++] = pz;
+          arcPos[j++] = nx; arcPos[j++] = ny; arcPos[j++] = nz;
+          px = nx; py = ny; pz = nz;
+        }
+      }
+      arcGeo.attributes.position.needsUpdate = true;
+      zapGlowSpr.position.copy(zapB);
+      var gs = 0.35 + Math.random() * 0.3;
+      zapGlowSpr.scale.set(gs, gs, 1);
+    }
+    // after the zap: a puff of smoke off the head and a few sparks
+    function zapBurst(u) {
+      zapC.set(0, 0.85, 0); u.body.localToWorld(zapC);
+      for (var i = 0; i < SPARK_N; i++) {
+        var a = Math.random() * PI * 2, sp = 0.6 + Math.random() * 1.2;
+        sparkPos[i * 3] = zapC.x; sparkPos[i * 3 + 1] = zapC.y - 0.35; sparkPos[i * 3 + 2] = zapC.z;
+        sparkVel[i * 3] = Math.cos(a) * sp; sparkVel[i * 3 + 1] = 1.2 + Math.random() * 1.6; sparkVel[i * 3 + 2] = Math.sin(a) * sp;
+      }
+      sparkGeo.attributes.position.needsUpdate = true;
+      for (var p = 0; p < smokePuffs.length; p++) {
+        smokePuffs[p].position.set(zapC.x + (p - 1) * 0.12, zapC.y + p * 0.05, zapC.z);
+        smokePuffs[p].scale.setScalar(0.6);
+        smokePuffs[p].visible = true;
+      }
+      sparks.visible = true;
+      FX.spark.opacity = 1;
+      FX.smoke.opacity = 0.6;
+      zapFxLife = ZAP_FX_LIFE;
+    }
+    function updateZapFx(dt) {
+      zapFxLife -= dt;
+      if (zapFxLife <= 0) { clearZapFx(); return; }
+      var k = 1 - zapFxLife / ZAP_FX_LIFE;
+      for (var i = 0; i < SPARK_N; i++) {
+        sparkVel[i * 3 + 1] -= 6 * dt;
+        sparkPos[i * 3] += sparkVel[i * 3] * dt;
+        sparkPos[i * 3 + 1] += sparkVel[i * 3 + 1] * dt;
+        sparkPos[i * 3 + 2] += sparkVel[i * 3 + 2] * dt;
+      }
+      sparkGeo.attributes.position.needsUpdate = true;
+      FX.spark.opacity = Math.max(0, 1 - k * 1.6);
+      for (var p = 0; p < smokePuffs.length; p++) {
+        smokePuffs[p].position.y += dt * (0.45 + p * 0.1);
+        smokePuffs[p].scale.setScalar(0.6 + k * (1.6 + p * 0.3));
+      }
+      FX.smoke.opacity = 0.6 * (1 - k);
+    }
+    function clearZapFx() {
+      zapFxLife = 0;
+      sparks.visible = false;
+      for (var p = 0; p < smokePuffs.length; p++) smokePuffs[p].visible = false;
     }
 
     /* ---- paper balls (pooled) ---- */
@@ -3164,7 +3467,9 @@
       for (var j = 0; j < confetti.length; j++) { confetti[j].active = false; confetti[j].m.visible = false; }
       confLive = 0;
       patrolFight = null;
+      clearZapFx();
       unitList.forEach(function (u) {
+        u.hairGrp.scale.set(1, 1, 1);
         u.fakeUntil = u.clapUntil = u.annoyedUntil = u.rubUntil = -1;
         u.throwAt = u.startleAt = -9;
         setOverText(u, '');
@@ -3194,6 +3499,7 @@
     var punchBtn = document.getElementById('ctx-punch');
     var gangBtn = document.getElementById('ctx-gang');
     var paperBtn = document.getElementById('ctx-paper');
+    var zapBtn = document.getElementById('ctx-zap');
     var pickHint = document.getElementById('pick-hint');
     var menuUnit = null, pickAttacker = null, pickMode = 'punch', hovered = null;
     var cvs = renderer.domElement;
@@ -3221,13 +3527,17 @@
       var y = Math.min(cy - r.top, r.height - menuEl.offsetHeight - 6);
       menuEl.style.left = Math.max(6, x) + 'px';
       menuEl.style.top = Math.max(6, y) + 'px';
-      punchBtn.disabled = !!u.fight;
-      punchBtn.title = u.fight ? 'Already in a fight' : 'Punch';
+      var busy = !!(u.fight || u.zapBy);
+      punchBtn.disabled = busy;
+      punchBtn.title = u.zapBy ? 'Being zapped' : (u.fight ? 'Already in a fight' : 'Punch');
       var nobody = !gangCandidates(u).length;
-      gangBtn.disabled = !!u.fight || nobody;
-      gangBtn.title = u.fight ? 'Already in a fight' : (nobody ? 'Nobody free to join' : 'Gang punch');
-      paperBtn.disabled = !!u.fight;
-      paperBtn.title = u.fight ? 'Busy fighting' : 'Throw paper';
+      gangBtn.disabled = busy || nobody;
+      gangBtn.title = u.zapBy ? 'Being zapped' : (u.fight ? 'Already in a fight' : (nobody ? 'Nobody free to join' : 'Gang punch'));
+      paperBtn.disabled = busy;
+      paperBtn.title = u.zapBy ? 'Being zapped' : (u.fight ? 'Busy fighting' : 'Throw paper');
+      var why = zapBlockReason(u);
+      zapBtn.disabled = !!why;
+      zapBtn.title = why || 'Zap';
     }
     function closeMenu() { if (menuEl) menuEl.hidden = true; menuUnit = null; }
     function beginPick(u, mode) {
@@ -3265,6 +3575,12 @@
       closeMenu();
       endPick();
       if (u && !u.fight && !u.dead) startGang(u);
+    });
+    zapBtn.addEventListener('click', function () {
+      var u = menuUnit;
+      closeMenu();
+      endPick();
+      if (u && !u.dead) startZap(u, 'manual');
     });
     document.addEventListener('pointerdown', function (e) {
       if (!menuEl.hidden && !menuEl.contains(e.target)) closeMenu();
@@ -3366,6 +3682,7 @@
       if (fights.length) updateFights(dt);
       if (ballsLive) updateBalls(dt);
       if (confLive) updateConfetti(dt);
+      if (zapFxLife > 0) updateZapFx(dt);
       for (var j = 0; j < unitList.length; j++) animateUnit(unitList[j], T, dt);
       renderer.render(scene, camera);
       positionLabels();
@@ -3456,7 +3773,9 @@
 
     resize();
     start();
-    return { sync: sync, show: show, hide: hide, celebrate: celebrate, resetEffects: resetEffects };
+    function isDozing(id) { var u = units[id]; return !!(u && !u.dead && u.dozing); }
+    return { sync: sync, show: show, hide: hide, celebrate: celebrate, resetEffects: resetEffects,
+      tryZap: tryZap, isDozing: isDozing };
   }
 
   /* ---- per-session view: #<session> in the URL shows only that coordinator's desks ---- */
@@ -3506,6 +3825,7 @@
     s = SESSION_RE.test(s || '') ? s : '';
     if (s === currentSession) { updateSessionUi(currentDesks()); return; }
     currentSession = s;
+    resetZaps();
     if (office3d) office3d.resetEffects();
     render(currentDesks());
   }
@@ -3670,12 +3990,15 @@
     wrap.className = 'desk ' + statusClass(it.status);
     if (it.stale) wrap.classList.add('stale');
     if (it.placeholder) wrap.classList.add('placeholder');
-    var dozing = it.dozing && !fx.clapping;
+    var dozing = it.dozing && !fx.clapping && !fx.zapped;
     if (dozing) wrap.classList.add('dozing');
     if (fx.clapping) wrap.classList.add('clapping');
+    if (fx.zapped) wrap.classList.add('zapped');
 
     var bubble = document.createElement('div');
-    if (fx.clapping) { bubble.className = 'bubble'; bubble.textContent = '👏'; }
+    if (fx.zapped) { bubble.className = 'bubble zap'; bubble.textContent = '⚡ ZZZT!'; }
+    else if (fx.zapSay) { bubble.className = 'bubble zap'; bubble.textContent = fx.zapSay; }
+    else if (fx.clapping) { bubble.className = 'bubble'; bubble.textContent = '👏'; }
     else if (dozing) { bubble.className = 'bubble zzz'; bubble.textContent = 'Z z z'; }
     else {
       bubble.className = 'bubble' + (it.outburst ? ' outburst' : '');
@@ -3751,9 +4074,14 @@
     var now = Date.now();
     Object.keys(celebrate2dUntil).forEach(function (id) { if (celebrate2dUntil[id] <= now) delete celebrate2dUntil[id]; });
     var anyClap = clap2dUntil > now;
+    var z2 = zap2d && zap2d.until > now ? zap2d : null;
+    var bossId = null;
+    if (z2) for (var bi = 0; bi < items.length; bi++) if (items[bi].canon === 'PM') { bossId = items[bi].id; break; }
     items.forEach(function (it) {
       var celebrating = celebrate2dUntil[it.id] > now;
-      var fx = { celebrating: celebrating, clapping: anyClap && !celebrating };
+      var zapped = !!(z2 && z2.id === it.id);
+      var fx = { celebrating: celebrating, clapping: anyClap && !celebrating && !zapped,
+        zapped: zapped, zapSay: z2 && it.id === bossId ? z2.say : '' };
       (rows[it.canon] || rows.Dev).appendChild(buildDesk2d(it, fx));
     });
     Object.keys(rows).forEach(function (k) { rows[k].classList.toggle('empty', !rows[k].firstChild); });
@@ -3777,6 +4105,103 @@
   }
 
   /* ================================================================
+     auto zap: the boss zaps desks stuck on "working" for too long, and now and then a sleeper.
+     Purely visual — runtime memory + two localStorage settings, never written to the data source.
+     ================================================================ */
+  var AUTOZAP_KEY = 'agent-office-autozap-min', ZAP_SLEEPERS_KEY = 'agent-office-zap-sleepers';
+  var ZAP_COOLDOWN_MS = 5 * 60 * 1000, ZAP_CHECK_MS = 15000, ZAP_PUMP_MS = 3000, ZAP_2D_MS = 2000;
+  var autoZapMin = (function () {
+    try {
+      var raw = localStorage.getItem(AUTOZAP_KEY);
+      var n = raw === null ? 10 : parseInt(raw, 10);
+      return isNaN(n) ? 10 : Math.max(0, Math.min(240, n));
+    } catch (e) { return 10; }
+  })();
+  var zapSleepers = (function () {
+    try { return localStorage.getItem(ZAP_SLEEPERS_KEY) !== '0'; } catch (e) { return true; }
+  })();
+  var zapCooldown = {};   // desk id -> ms when it was last zapped
+  var zapQueue = [];      // [{ id, kind: 'slow' | 'sleep' }], one zap at a time
+  var zap2d = null, zap2dTimer = 0, sleeperTimer = 0;
+
+  function zapItem(id) {
+    if (!lastItems) return null;
+    for (var i = 0; i < lastItems.length; i++) if (lastItems[i].id === id) return lastItems[i];
+    return null;
+  }
+  function onZapCooldown(id, now) { return zapCooldown[id] != null && now - zapCooldown[id] < ZAP_COOLDOWN_MS; }
+  function isSlowWorker(it, now) {
+    if (!it || it.placeholder || it.canon === 'PM' || !autoZapMin || it.status !== 'working') return false;
+    var t = it.updatedAt ? Date.parse(it.updatedAt) : NaN;
+    return !isNaN(t) && now - t > autoZapMin * 60000;
+  }
+  function isSleeping(id) {
+    if (view === '3d') return !!(office3d && office3d.isDozing(id));
+    var it = zapItem(id);
+    return !!(it && it.dozing);
+  }
+  function queueZap(id, kind) {
+    for (var i = 0; i < zapQueue.length; i++) if (zapQueue[i].id === id) return;
+    zapQueue.push({ id: id, kind: kind });
+  }
+  function zapStillWanted(q, now) {
+    var it = zapItem(q.id);
+    if (!it || it.canon === 'PM' || onZapCooldown(q.id, now)) return false;
+    return q.kind === 'slow' ? isSlowWorker(it, now) : (zapSleepers && isSleeping(q.id));
+  }
+  function tryZap2d(id, kind, now) {
+    if (zap2d && zap2d.until > now) return 'busy';
+    var it = zapItem(id);
+    if (!it) return 'gone';
+    zap2d = { id: id, until: now + ZAP_2D_MS, say: kind === 'sleep' ? '⚡ Wake up!' : '⚡ Faster!' };
+    if ((it.status || 'idle') === 'idle') idleSince[id] = zap2d.until;   // jolted awake, nods off again after
+    clearTimeout(zap2dTimer);
+    zap2dTimer = setTimeout(function () { zap2dTimer = 0; if (view === '2d') render(currentDesks()); }, ZAP_2D_MS + 30);
+    render(currentDesks());
+    return 'started';
+  }
+  function pumpZap() {
+    if (document.hidden) return;
+    var now = Date.now();
+    while (zapQueue.length) {
+      var q = zapQueue[0];
+      if (!zapStillWanted(q, now)) { zapQueue.shift(); continue; }
+      var r = view === '3d' ? (office3d ? office3d.tryZap(q.id, q.kind) : 'gone') : tryZap2d(q.id, q.kind, now);
+      if (r === 'busy') return;   // boss in a fight / on patrol / mid-zap: retry on the next pump
+      zapQueue.shift();
+      if (r === 'started') { zapCooldown[q.id] = now; return; }
+    }
+  }
+  function checkSlowWorkers() {
+    if (!lastItems || !autoZapMin) return;
+    var now = Date.now();
+    lastItems.forEach(function (it) {
+      if (isSlowWorker(it, now) && !onZapCooldown(it.id, now)) queueZap(it.id, 'slow');
+    });
+    pumpZap();
+  }
+  function zapRandomSleeper() {
+    if (!zapSleepers || !lastItems || document.hidden) return;
+    var now = Date.now(), pool = [];
+    lastItems.forEach(function (it) {
+      if (it.canon !== 'PM' && !onZapCooldown(it.id, now) && isSleeping(it.id)) pool.push(it.id);
+    });
+    if (!pool.length) return;
+    queueZap(pool[(Math.random() * pool.length) | 0], 'sleep');
+    pumpZap();
+  }
+  function scheduleSleeperZap() {
+    clearTimeout(sleeperTimer);
+    sleeperTimer = setTimeout(function () { zapRandomSleeper(); scheduleSleeperZap(); }, 45000 + Math.random() * 45000);
+  }
+  function resetZaps() {   // session / view switch: drop pending zaps and the 2D flash (cooldowns stay)
+    zapQueue.length = 0;
+    zap2d = null;
+    clearTimeout(zap2dTimer);
+    zap2dTimer = 0;
+  }
+
+  /* ================================================================
      view switch (2D | 3D), remembered per browser
      ================================================================ */
   var VIEW_KEY = 'agent-office-view';
@@ -3787,6 +4212,7 @@
 
   function setView(v, save) {
     view = v === '2d' ? '2d' : '3d';
+    resetZaps();
     if (save) { try { localStorage.setItem(VIEW_KEY, view); } catch (e) {} }
     viewButtons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === view)); });
     var el2d = document.getElementById('office-2d');
@@ -3946,8 +4372,31 @@
   }
   renderNamesPanel();
 
+  // auto-zap settings (Team drawer)
+  var autoZapInput = document.getElementById('autozap-min-input');
+  if (autoZapInput) {
+    autoZapInput.value = autoZapMin;
+    autoZapInput.addEventListener('change', function () {
+      var n = parseInt(autoZapInput.value, 10);
+      if (!isNaN(n)) autoZapMin = Math.max(0, Math.min(240, n));
+      autoZapInput.value = autoZapMin;
+      try { localStorage.setItem(AUTOZAP_KEY, String(autoZapMin)); } catch (e) {}
+    });
+  }
+  var zapSleepersInput = document.getElementById('zap-sleepers-input');
+  if (zapSleepersInput) {
+    zapSleepersInput.checked = zapSleepers;
+    zapSleepersInput.addEventListener('change', function () {
+      zapSleepers = !!zapSleepersInput.checked;
+      try { localStorage.setItem(ZAP_SLEEPERS_KEY, zapSleepers ? '1' : '0'); } catch (e) {}
+    });
+  }
+
   render(EXAMPLE_DESKS);
   startData();
+  setInterval(checkSlowWorkers, ZAP_CHECK_MS);
+  setInterval(function () { if (zapQueue.length) pumpZap(); }, ZAP_PUMP_MS);
+  scheduleSleeperZap();
 
   // Re-render periodically: refreshes staleness fading and re-rolls bubble
   // text (real label vs. a censored outburst) — purely cosmetic, no db calls.
