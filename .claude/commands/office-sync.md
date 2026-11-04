@@ -7,7 +7,10 @@ description: Write this session's agent team to the Agent Office (artifact and/o
 Read this project's `CLAUDE.md` and `AGENTS.md` (project root) and decide the mode:
 - **local** — there is an `## Agent Office (local)` section.
 - **artifact** — there is an Agent Office / office dashboard section with a `https://claude.ai/artifact/...` link.
-- **both** — both are there: do steps 1–2 for each.
+- **both** — both are there: unless you already asked earlier this conversation, ask the user which office to use for
+  this session — **local**, **Claude (artifact)** or **both** — and remember the answer for the rest of the conversation.
+  That choice also decides where your automatic desk updates go (the AGENTS.md/CLAUDE.md sections) from now on; do steps
+  1–2 only for the chosen mode(s).
 - **neither** — first run: ask the user which they want (local, artifact or both), then do the setup below. Artifact mode
   needs the `ArtifactData` tool (Claude Code signed in to claude.ai); if you don't have it, only offer local.
 
