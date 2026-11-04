@@ -1025,6 +1025,17 @@
     font-size: 0.68rem;
     margin-top: 14px;
   }
+  footer.note .source-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    margin-right: 6px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    letter-spacing: 0.02em;
+    opacity: 0.85;
+  }
+  footer.note .source-badge.live { color: var(--working); }
 
   .names-toggle {
     display: block;
@@ -1150,7 +1161,7 @@
     </div>
   </div>
 
-  <footer class="note">Updates when the coordinator dispatches or reviews work. Desks fade when a status hasn't changed in a while.</footer>
+  <footer class="note"><span class="source-badge" id="source-badge">example data</span> Updates when the coordinator dispatches or reviews work. Desks fade when a status hasn't changed in a while.</footer>
 
   <button class="names-toggle" id="names-toggle" type="button" aria-expanded="false">Name the team</button>
   <div class="names-panel" id="names-panel" hidden>
@@ -1217,7 +1228,8 @@
   var names = loadNames();
 
   function currentDesks() {
-    return Object.keys(desksById).length ? Object.values(desksById) : EXAMPLE_DESKS;
+    if (usingExample) return EXAMPLE_DESKS;
+    return Object.values(desksById);
   }
 
   function renderNamesPanel() {
@@ -2207,7 +2219,7 @@
         // hair that swings
         tail: tailPivot || null, braids: braids || null,
         // dozing / startle
-        zzz: zzz, zs: zs, idleT: 0, dozeAfter: 20 + Math.random() * 20, dozing: false, startleAt: -9,
+        zzz: zzz, zs: zs, idleT: 0, dozeAfter: 1 + Math.random(), dozing: false, startleAt: -9,
         // paper ball reaction, boss-patrol fake typing, clapping
         annoyedUntil: -1, annoyedFace: 0, rubUntil: -1, throwAt: -9,
         fakeUntil: -1, clapUntil: -1, screenDirty: false,
@@ -2443,9 +2455,12 @@
     // ---- animation ----
     function smooth01(x) { x = x < 0 ? 0 : (x > 1 ? 1 : x); return x * x * (3 - 2 * x); }
 
+    // Idle desks sleep. Work (a non-idle status) or an interaction wakes them; once the
+    // interaction is over and they are still idle, they nod off again after DOZE_AGAIN seconds.
+    var DOZE_AGAIN = 1.5;
     function wake(u) {
       if (u.dozing) { u.dozing = false; u.startleAt = T; }
-      if (u.idleT) { u.idleT = 0; u.dozeAfter = 20 + Math.random() * 20; }
+      u.idleT = 0; u.dozeAfter = DOZE_AGAIN;
     }
 
     function animateUnit(u, T, dt) {
@@ -2456,8 +2471,9 @@
       var faking = u.fakeUntil > T && !u.fight;      // the boss walks by: look busy
       var clapping = u.clapUntil > T && !u.fight;
       var annoyed = u.annoyedUntil > T && !u.fight;  // just hit by a paper ball
-      // dozing: idle (or a placeholder) long enough with nothing else going on
-      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed && T >= (u.hitUntil || -1) + 0.7;
+      // dozing: any idle desk (real or placeholder) with nothing else going on falls asleep almost at once
+      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed &&
+        T >= (u.hitUntil || -1) + 0.7 && T - u.throwAt >= 0.55;
       if (quiet) {
         u.idleT += dt;
         if (!u.dozing && u.idleT > u.dozeAfter) u.dozing = true;
@@ -3462,7 +3478,7 @@
   try { window.addEventListener('hashchange', function () { applySession(hashSession()); }); } catch (e) {}
 
   var prevStatus = null;                  // id -> status from the last real snapshot (null before the first)
-  var idleSince = {}, dozeAfterMs = {};   // 2D dozing timers (runtime only)
+  var idleSince = {};   // 2D dozing timers (runtime only)
   var celebrate2dUntil = {}, clap2dUntil = 0, clapTimer = 0;
 
   function render(desksIn) {
@@ -3513,10 +3529,25 @@
     drawActive(fresh.filter(function (id) { return visible[id]; }));
   }
 
+  // 2D: an idle desk nods off ~1.5 s after it became idle or after the last clapping ended;
+  // a one-shot re-render is scheduled for the moment the next one is due.
+  var DOZE_2D_MS = 1500, doze2dTimer = 0, doze2dAt = 0;
   function dozing2d(d, now) {
     if ((d.status || 'idle') !== 'idle') { delete idleSince[d.id]; return false; }
-    if (!idleSince[d.id]) { idleSince[d.id] = now; dozeAfterMs[d.id] = 20000 + Math.random() * 20000; }
-    return now - idleSince[d.id] > dozeAfterMs[d.id];
+    if (!idleSince[d.id]) idleSince[d.id] = now;
+    var due = Math.max(idleSince[d.id], clap2dUntil) + DOZE_2D_MS;
+    if (now >= due) return true;
+    scheduleDoze2d(due);
+    return false;
+  }
+  function scheduleDoze2d(at) {
+    if (doze2dTimer && doze2dAt <= at) return;
+    clearTimeout(doze2dTimer);
+    doze2dAt = at;
+    doze2dTimer = setTimeout(function () {
+      doze2dTimer = 0;
+      if (view === '2d') render(currentDesks());
+    }, Math.max(0, at - Date.now()) + 30);
   }
 
   // Only the view on screen is drawn; the other one catches up when switched to.
@@ -3528,7 +3559,7 @@
       fresh.forEach(function (id) { celebrate2dUntil[id] = until; });
       clap2dUntil = until;
       clearTimeout(clapTimer);
-      clapTimer = setTimeout(function () { if (view === '2d' && lastItems) render2d(lastItems); }, 2300);
+      clapTimer = setTimeout(function () { if (view === '2d' && lastItems) render(currentDesks()); }, 2300);
     }
     if (view === '3d') {
       if (office3d) {
@@ -3738,18 +3769,55 @@
   buildShelf();
   setView(view, false);
 
-  function tryDb() {
-    if (!window.claude || !window.claude.use) { render(EXAMPLE_DESKS); return; }
-    window.claude.use('db').then(function (db) {
-      if (!db) { render(EXAMPLE_DESKS); return; }
-      usingExample = false;
-      subscribe(db);
-    }).catch(function () { render(EXAMPLE_DESKS); });
+  // ---- data sources: artifact db (claude.ai) → local server (/api/events) → example desks ----
+  var sourceBadge = document.getElementById('source-badge');
+  function setSource(kind) {   // 'artifact' | 'local' | 'example'
+    if (!sourceBadge) return;
+    sourceBadge.textContent = kind === 'example' ? 'example data' : 'live · ' + kind;
+    sourceBadge.className = 'source-badge' + (kind === 'example' ? '' : ' live');
+  }
+
+  function showExample() {
+    usingExample = true;
+    desksById = {};
+    setSource('example');
+    render(EXAMPLE_DESKS);
+  }
+
+  // Shared sink for every live source: a full list of desk objects ({ id, role, status, ... }).
+  function applyDesks(list, kind) {
+    usingExample = false;
+    setSource(kind);
+    desksById = {};
+    (list || []).forEach(function (d) { if (d && d.id) desksById[d.id] = d; });
+    render(Object.values(desksById));
+  }
+
+  function canTryLocal() {
+    var loc = window.location || {};
+    if (loc.protocol !== 'http:' && loc.protocol !== 'https:') return false;
+    var host = String(loc.hostname || '');
+    return !(host === 'claude.ai' || /\.claude\.ai$/.test(host) || /(^|\.)claudeusercontent\.com$/.test(host));
+  }
+
+  function startData() {
+    if (window.claude && window.claude.use) {
+      window.claude.use('db').then(function (db) {
+        if (!db) { fallbackFromArtifact(); return; }
+        subscribe(db);
+      }).catch(function () { fallbackFromArtifact(); });
+      return;
+    }
+    fallbackFromArtifact();
+  }
+
+  function fallbackFromArtifact() {
+    if (canTryLocal()) subscribeLocal(); else showExample();
   }
 
   function subscribe(db) {
     var loadTimer = setTimeout(function () {
-      if (usingExample) render(EXAMPLE_DESKS);
+      if (usingExample) showExample();
     }, 10000);
 
     try {
@@ -3758,17 +3826,59 @@
         var list = (snap && snap.docs ? snap.docs : []).map(function (doc) {
           return Object.assign({ id: doc.id }, doc.data() || {});
         });
-        desksById = {};
-        list.forEach(function (d) { desksById[d.id] = d; });
-        render(list.length ? list : []);
+        applyDesks(list, 'artifact');
       }, function () {
         clearTimeout(loadTimer);
-        render(EXAMPLE_DESKS);
+        showExample();
       });
     } catch (e) {
       clearTimeout(loadTimer);
-      render(EXAMPLE_DESKS);
+      showExample();
     }
+  }
+
+  // Local mode: `node server.js` serves this page plus /api/events (SSE) and /api/desks (JSON).
+  function subscribeLocal() {
+    var gotData = false;
+    var pollTimer = null;
+    var loadTimer = setTimeout(function () {
+      if (!gotData) showExample();
+    }, 10000);
+
+    function onList(list) {
+      if (!Array.isArray(list)) return;
+      gotData = true;
+      clearTimeout(loadTimer);
+      applyDesks(list, 'local');
+    }
+
+    function poll() {
+      if (pollTimer) return;
+      var tick = function () {
+        if (typeof fetch !== 'function') return;
+        fetch('/api/desks', { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(onList)
+          .catch(function () { /* keep the last picture; retry next tick */ });
+      };
+      tick();
+      pollTimer = setInterval(tick, 2000);
+    }
+
+    if (typeof window.EventSource !== 'function') { poll(); return; }
+    var es;
+    try { es = new window.EventSource('/api/events'); } catch (e) { poll(); return; }
+    var opened = false;
+    es.addEventListener('open', function () { opened = true; });
+    es.addEventListener('desks', function (ev) {
+      opened = true;
+      try { onList(JSON.parse(ev.data)); } catch (e) {}
+    });
+    es.addEventListener('error', function () {
+      // Never connected (no server / no SSE) → fall back to polling. A dropped live
+      // stream reconnects by itself; EventSource retries unless it is CLOSED.
+      if (!opened || es.readyState === 2) { try { es.close(); } catch (e) {} poll(); }
+    });
   }
 
   var toggleBtn = document.getElementById('names-toggle');
@@ -3784,7 +3894,7 @@
   renderNamesPanel();
 
   render(EXAMPLE_DESKS);
-  tryDb();
+  startData();
 
   // Re-render periodically: refreshes staleness fading and re-rolls bubble
   // text (real label vs. a censored outburst) — purely cosmetic, no db calls.

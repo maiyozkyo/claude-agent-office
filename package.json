@@ -1,0 +1,19 @@
+{
+  "name": "claude-agent-office",
+  "version": "1.0.0",
+  "description": "Chibi office view of an AI agent team (PM / BA / Dev / QC) — as a claude.ai Artifact or served locally from desk JSON files.",
+  "license": "MIT",
+  "bin": {
+    "agent-office": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "files": [
+    "server.js",
+    "office-dashboard.html"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
