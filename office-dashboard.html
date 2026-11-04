@@ -1,0 +1,3815 @@
+<title>Agent Office</title>
+<style>
+  /* Two views of the same desks, switched in the header (2D | 3D):
+     3D — a low-poly office (Three.js): back + left wall with window, clock, bookshelf, plant;
+       the PM sits on a raised loft at the back, Dev desks on the left, BA in the middle, QC on the right.
+       Labels (bubble, name, status) are HTML overlays pinned above each character's head. Everything under .view-3d.
+     2D — a CSS chibi office: wall strip with the PM on top, framed floor below (Dev | BA | QC).
+       Everything under .view-2d. */
+  :root {
+    --bg: #eef1f6;
+    --floor-a: #dfe6f3;
+    --floor-b: #cfd9ee;
+    --wall-a: #aab8dd;
+    --wall-b: #8fa0d1;
+    --ink: #2a2f45;
+    --muted: #68708e;
+    --accent: #ff8a5c;
+    --paper: #ffffff;
+    --paper-edge: #d6dcec;
+    --wood: #c89a6b;
+    --wood-dark: #a6794f;
+    --skin: #ffd9ad;
+    --pm: #6c7ee8;
+    --pm-dark: #4a59c2;
+    --ba: #2fb3a1;
+    --ba-dark: #1f8f80;
+    --dev: #ff8a5c;
+    --dev-dark: #e2683a;
+    --qc: #e85c9c;
+    --qc-dark: #c23f7c;
+    --idle: #9aa4bf;
+    --working: #2fae6b;
+    --reviewing: #6c7ee8;
+    --done: #2fb3a1;
+    --blocked: #e8483f;
+    --glass: #bfdcff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141726;
+      --floor-a: #1c2032;
+      --floor-b: #171a28;
+      --wall-a: #2a3050;
+      --wall-b: #212542;
+      --ink: #e8eaf5;
+      --muted: #929ac0;
+      --paper: #1f2336;
+      --paper-edge: #343c5c;
+      --wood: #7a5a3a;
+      --wood-dark: #5c4228;
+      --glass: #33497a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141726;
+    --floor-a: #1c2032;
+    --floor-b: #171a28;
+    --wall-a: #2a3050;
+    --wall-b: #212542;
+    --ink: #e8eaf5;
+    --muted: #929ac0;
+    --paper: #1f2336;
+    --paper-edge: #343c5c;
+    --wood: #7a5a3a;
+    --wood-dark: #5c4228;
+    --glass: #33497a;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Nunito", -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 16px;
+    padding-block: 20px;
+  }
+
+  .page { max-width: 1600px; margin: 0 auto; }
+
+  header.top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-family: "Baloo 2", "Nunito", sans-serif;
+    font-size: 1.55rem;
+    margin: 0;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 2px 0 0;
+  }
+  .legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+
+  /* ---- view switch (2D | 3D) ---- */
+  .top-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .view-switch {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    border-radius: 999px;
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+  }
+  .view-switch button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font: 800 0.74rem "Nunito", sans-serif;
+    padding: 4px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    min-width: 42px;
+  }
+  .view-switch button:hover { color: var(--ink); }
+  .view-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .view-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- office frame shared by both views ---- */
+  .office {
+    border-radius: 22px;
+    overflow: hidden;
+    border: 1px solid var(--paper-edge);
+  }
+  .office[hidden] { display: none; }
+  .office.view-3d { background: var(--bg); }
+  .office.view-2d { background: var(--floor-a); }
+
+  /* ================= 3D view ================= */
+  .view-3d .stage {
+    position: relative;
+    width: 100%;
+    height: 560px;
+    overflow: hidden;
+    cursor: grab;
+  }
+  .view-3d .stage:active { cursor: grabbing; }
+  .view-3d .stage canvas { display: block; width: 100%; height: 100%; }
+  .view-3d .labels {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .view-3d .hint {
+    position: absolute;
+    right: 12px; bottom: 10px;
+    font-size: 0.62rem;
+    color: var(--muted);
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 999px;
+    padding: 2px 9px;
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .view-3d .fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 20px;
+  }
+
+  /* label stack pinned above a character's head */
+  .view-3d .tag {
+    position: absolute;
+    left: 0; top: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    will-change: transform;
+    transition: opacity 0.3s ease;
+  }
+  .view-3d .tag[hidden] { display: none; }
+  .view-3d .tag.stale { opacity: 0.45; }
+  .view-3d .tag.placeholder { opacity: 0.72; }
+  .view-3d .tag.placeholder .name-tag { color: var(--muted); }
+
+  .view-3d .bubble {
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 10px;
+    padding: 3px 9px;
+    font-size: 0.6rem;
+    color: var(--ink);
+    max-width: 140px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    min-height: 1.1em;
+    position: relative;
+  }
+  .view-3d .bubble:empty { visibility: hidden; }
+  .view-3d .bubble.outburst {
+    background: #fdeceb;
+    border-color: #f3b4ae;
+    color: #c0392b;
+    font-weight: 800;
+    animation: outburstPop 0.3s ease-out;
+  }
+  @keyframes outburstPop { 0% { transform: scale(0.85); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .view-3d .bubble.outburst { background: #3a2222; border-color: #6b2f2a; color: #ff8a80; }
+  }
+  :root[data-theme="dark"] .view-3d .bubble.outburst { background: #3a2222; border-color: #6b2f2a; color: #ff8a80; }
+
+  .view-3d .name-tag {
+    text-align: center;
+    line-height: 1.1;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: var(--ink);
+    min-height: 1.1em;
+    text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg);
+    white-space: nowrap;
+  }
+  .view-3d .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin: 2px 0 0;
+    text-transform: capitalize;
+    background: var(--paper);
+    border-radius: 999px;
+    padding: 2px 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    white-space: nowrap;
+  }
+  .view-3d .status-pill i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .view-3d .st-idle .status-pill i { background: var(--idle); }
+  .view-3d .st-working .status-pill i { background: var(--working); }
+  .view-3d .st-reviewing .status-pill i { background: var(--reviewing); }
+  .view-3d .st-done .status-pill i { background: var(--done); }
+  .view-3d .st-blocked .status-pill i { background: var(--blocked); }
+
+  /* many desks: shrink the labels so they crowd less */
+  .view-3d .stage.dense .bubble { font-size: 0.52rem; max-width: 104px; padding: 2px 6px; }
+  .view-3d .stage.dense .name-tag { font-size: 0.64rem; }
+  .view-3d .stage.dense .status-pill { font-size: 0.52rem; padding: 1px 6px; }
+
+  /* right-click / long-press menu + punch target picking (purely visual, never writes data) */
+  .view-3d .ctx-menu {
+    position: absolute;
+    z-index: 20001;
+    display: flex;
+    gap: 4px;
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  }
+  .view-3d .ctx-menu[hidden] { display: none; }
+  .view-3d .ctx-menu button {
+    width: 38px; height: 38px;
+    border: none;
+    border-radius: 9px;
+    background: var(--bg);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .view-3d .ctx-menu button.gang { width: auto; min-width: 38px; padding: 0 6px; font-size: 1.05rem; letter-spacing: -3px; }
+  .view-3d .ctx-menu button:hover { background: var(--accent); }
+  .view-3d .ctx-menu button:disabled { opacity: 0.4; cursor: not-allowed; background: var(--bg); }
+  .view-3d .pick-hint {
+    position: absolute;
+    left: 50%; top: 12px;
+    transform: translateX(-50%);
+    z-index: 20000;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 4px 12px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .view-3d .pick-hint[hidden] { display: none; }
+  .view-3d .stage.picking, .view-3d .stage.picking:active { cursor: crosshair; }
+  .view-3d .tag.hl .name-tag { color: var(--accent); }
+  .view-3d .tag.hl .bubble { border-color: var(--accent); }
+  .view-3d .pow {
+    position: absolute;
+    left: 0; top: 0;
+    font-family: "Baloo 2", "Nunito", sans-serif;
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: #ffcf3a;
+    -webkit-text-stroke: 1.5px #c0392b;
+    text-shadow: 0 2px 0 #c0392b;
+    pointer-events: none;
+    white-space: nowrap;
+    will-change: transform;
+  }
+  .view-3d .pow span { display: inline-block; animation: powPop 0.4s ease-out; }
+  @keyframes powPop { 0% { transform: scale(0.4) rotate(-12deg); } 60% { transform: scale(1.25) rotate(6deg); } 100% { transform: scale(1) rotate(0deg); } }
+
+  .view-3d .empty-office {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 12px;
+    padding: 10px 16px;
+    pointer-events: none;
+  }
+  .view-3d .empty-office[hidden] { display: none; }
+  @media (max-width: 640px) {
+    .view-3d .stage { height: 440px; }
+    .view-3d .hint { display: none; }
+  }
+
+  /* ================= 2D view ================= */
+  .view-2d .wall {
+    position: relative;
+    min-height: 250px;
+    padding: 24px 16px 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    background: linear-gradient(180deg, var(--wall-a), var(--wall-b));
+    border-bottom: 6px solid var(--wood-dark);
+  }
+  .view-2d .window {
+    position: absolute;
+    top: 20px; left: 6%;
+    width: 78px;
+    aspect-ratio: 4 / 3;
+    background: linear-gradient(160deg, #cfe3ff, #9fc3f2);
+    border: 4px solid rgba(255,255,255,0.65);
+    border-radius: 6px;
+    opacity: 0.85;
+  }
+  .view-2d .window::before {
+    content: '';
+    position: absolute;
+    left: 50%; top: 0; bottom: 0; width: 4px; margin-left: -2px;
+    background: rgba(255,255,255,0.65);
+  }
+  .view-2d .clock {
+    position: absolute;
+    top: 20px; right: 7%;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 3px solid rgba(255,255,255,0.7);
+  }
+  .view-2d .clock::before, .view-2d .clock::after {
+    content: '';
+    position: absolute;
+    left: 50%; top: 50%;
+    background: var(--ink);
+    transform-origin: 0 100%;
+  }
+  .view-2d .clock::before { width: 2px; height: 8px; transform: translate(-1px,-100%) rotate(45deg); }
+  .view-2d .clock::after { width: 2px; height: 11px; transform: translate(-1px,-100%) rotate(160deg); }
+  .view-2d .shelf {
+    position: absolute;
+    top: 64px; left: 22%;
+    width: 120px;
+    height: 7px;
+    background: var(--wood-dark);
+    border-radius: 2px;
+  }
+  .view-2d .shelf .book {
+    position: absolute;
+    bottom: 7px;
+    width: 9px;
+    border-radius: 2px 2px 0 0;
+  }
+  .view-2d .plant {
+    position: absolute;
+    bottom: 0; left: 2.5%;
+    width: 34px;
+  }
+  .view-2d .plant .pot { width: 22px; height: 16px; margin: 0 auto; background: var(--wood-dark); border-radius: 3px 3px 7px 7px; }
+  .view-2d .plant .leaves { width: 34px; height: 30px; margin: 0 auto -6px; position: relative; }
+  .view-2d .plant .leaf {
+    position: absolute;
+    bottom: 0;
+    width: 14px; height: 26px;
+    background: #4f9f6a;
+    border-radius: 50% 50% 4px 4px;
+    transform-origin: bottom center;
+    animation: leafSway 4s ease-in-out infinite;
+  }
+  .view-2d .plant .leaf:nth-child(1) { left: 2px; transform: rotate(-18deg); animation-delay: -1s; }
+  .view-2d .plant .leaf:nth-child(2) { left: 10px; background: #3f8f5c; animation-delay: -2.4s; }
+  .view-2d .plant .leaf:nth-child(3) { left: 18px; transform: rotate(18deg); animation-delay: -0.4s; }
+  @keyframes leafSway {
+    0%, 100% { rotate: -6deg; }
+    50% { rotate: 6deg; }
+  }
+
+  /* Floor frame: Dev (left) | BA (middle) | QC (right). Columns are pinned
+     with grid-column so an empty column never shifts the others. */
+  .view-2d .floor {
+    max-height: 460px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px 40px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: start;
+    gap: 28px;
+    background: repeating-linear-gradient(90deg, var(--floor-a) 0 48px, var(--floor-b) 48px 50px);
+  }
+  .view-2d .zone { min-width: 0; display: flex; flex-direction: column; align-items: center; }
+  .view-2d .zone-left { grid-column: 1; }
+  .view-2d .zone-mid { grid-column: 2; }
+  .view-2d .zone-right { grid-column: 3; }
+  .view-2d .zone-left .row, .view-2d .zone-right .row { max-width: 300px; }
+  .view-2d .row {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  .view-2d .row:last-child { margin-bottom: 0; }
+  .view-2d .row.empty { display: none; }
+  .view-2d .empty-office { grid-column: 1 / -1; }
+
+  /* ---- desk unit ---- */
+  .view-2d .desk {
+    width: 128px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    filter: drop-shadow(0 6px 8px rgba(20,24,40,0.18));
+  }
+  .view-2d .desk.stale { opacity: 0.4; filter: none; }
+  .view-2d .desk.placeholder { opacity: 0.72; }
+  .view-2d .desk.placeholder .name-tag { color: var(--muted); }
+
+  .view-2d .bubble {
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 10px;
+    padding: 3px 9px;
+    font-size: 0.6rem;
+    color: var(--ink);
+    max-width: 124px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    min-height: 1.1em;
+    position: relative;
+    z-index: 3;
+  }
+  .view-2d .bubble:empty { visibility: hidden; }
+  .view-2d .bubble.outburst {
+    background: #fdeceb;
+    border-color: #f3b4ae;
+    color: #c0392b;
+    font-weight: 800;
+    animation: outburstPop 0.3s ease-out;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .view-2d .bubble.outburst { background: #3a2222; border-color: #6b2f2a; color: #ff8a80; }
+  }
+  :root[data-theme="dark"] .view-2d .bubble.outburst { background: #3a2222; border-color: #6b2f2a; color: #ff8a80; }
+  .view-2d .bubble::after {
+    content: "";
+    position: absolute;
+    bottom: -5px; left: 50%;
+    margin-left: -5px;
+    border: 5px solid transparent;
+    border-top-color: var(--paper);
+  }
+
+  .view-2d .name-tag {
+    text-align: center;
+    line-height: 1.1;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: var(--ink);
+    min-height: 1.1em;
+  }
+
+  /* role plate standing right on the desk surface, in front of the character */
+  .view-2d .desk-plate {
+    position: absolute;
+    bottom: 25px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    padding: 1px 7px;
+    border-radius: 4px;
+    z-index: 5;
+    white-space: nowrap;
+  }
+  :root[data-theme="dark"] .view-2d .desk-plate { background: var(--paper); color: var(--ink); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .view-2d .desk-plate { background: var(--paper); color: var(--ink); }
+  }
+  .view-2d .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin: 2px 0 4px;
+    text-transform: capitalize;
+    background: var(--paper);
+    border-radius: 999px;
+    padding: 2px 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  }
+  .view-2d .status-pill i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .view-2d .st-idle .status-pill i { background: var(--idle); }
+  .view-2d .st-working .status-pill i { background: var(--working); }
+  .view-2d .st-reviewing .status-pill i { background: var(--reviewing); }
+  .view-2d .st-done .status-pill i { background: var(--done); }
+  .view-2d .st-blocked .status-pill i { background: var(--blocked); }
+
+  .view-2d .scene {
+    width: 110px;
+    height: 100px;
+    position: relative;
+  }
+
+  /* chair, behind the character */
+  .view-2d .chair {
+    position: absolute;
+    bottom: 26px; left: 50%;
+    width: 46px; height: 34px;
+    margin-left: -23px;
+    z-index: 0;
+  }
+  .view-2d .chair .back {
+    position: absolute;
+    top: 0; left: 15px;
+    width: 16px; height: 22px;
+    background: var(--wood-dark);
+    border-radius: 5px 5px 2px 2px;
+    opacity: 0.9;
+  }
+  .view-2d .chair .seat {
+    position: absolute;
+    bottom: 6px; left: 2px;
+    width: 42px; height: 8px;
+    background: var(--wood-dark);
+    border-radius: 4px;
+    opacity: 0.9;
+  }
+  .view-2d .chair .leg {
+    position: absolute;
+    bottom: 0; width: 3px; height: 8px;
+    background: var(--wood-dark);
+    opacity: 0.8;
+  }
+  .view-2d .chair .leg.l { left: 4px; } .view-2d .chair .leg.r { left: 39px; }
+
+  /* desk surface + laptop, in front of the character's lap, behind torso top */
+  .view-2d .desk-top {
+    position: absolute;
+    bottom: 10px; left: 50%;
+    width: 96px; height: 14px;
+    margin-left: -48px;
+    background: var(--wood);
+    border-radius: 3px;
+    box-shadow: 0 5px 0 var(--wood-dark);
+    z-index: 4;
+  }
+  .view-2d .laptop {
+    position: absolute;
+    bottom: 18px; left: 50%;
+    margin-left: -15px;
+    width: 30px; height: 20px;
+    z-index: 5;
+  }
+  .view-2d .laptop .screen {
+    width: 26px; height: 16px;
+    margin: 0 auto;
+    background: #2b2f42;
+    border-radius: 2px 2px 0 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .view-2d .laptop .glow {
+    position: absolute;
+    inset: 2px;
+    background: var(--working);
+    opacity: 0.55;
+    border-radius: 1px;
+  }
+  .view-2d .laptop .base {
+    width: 30px; height: 3px;
+    background: #454a66;
+    border-radius: 0 0 3px 3px;
+  }
+
+  /* ---- chibi character, built from plain HTML divs (no SVG transform quirks) ---- */
+  .view-2d .char {
+    position: absolute;
+    bottom: 18px; left: 50%;
+    margin-left: -18px;
+    width: 36px; height: 58px;
+    z-index: 3;
+  }
+  .view-2d .char-body {
+    position: relative;
+    width: 100%; height: 100%;
+  }
+  .view-2d .shadow-oval {
+    position: absolute;
+    bottom: -4px; left: 50%;
+    width: 30px; height: 7px;
+    margin-left: -15px;
+    background: rgba(20,20,30,0.15);
+    border-radius: 50%;
+  }
+  .view-2d .torso {
+    position: absolute;
+    bottom: 10px; left: 50%;
+    width: 24px; height: 22px;
+    margin-left: -12px;
+    border-radius: 11px 11px 7px 7px;
+    z-index: 1;
+  }
+  .view-2d .collar {
+    position: absolute;
+    bottom: 10px; left: 50%;
+    width: 24px; height: 7px;
+    margin-left: -12px;
+    border-radius: 7px 7px 0 0;
+    z-index: 2;
+  }
+  .view-2d .arm {
+    position: absolute;
+    bottom: 13px;
+    width: 7px; height: 16px;
+    border-radius: 4px;
+    z-index: 2;
+    transform-origin: 50% 10%;
+  }
+  .view-2d .arm.left { left: -1px; }
+  .view-2d .arm.right { right: -1px; }
+  .view-2d .head {
+    position: absolute;
+    top: 0; left: 50%;
+    width: 26px; height: 24px;
+    margin-left: -13px;
+    background: var(--skin);
+    border-radius: 50% 50% 46% 46%;
+    z-index: 3;
+  }
+  .view-2d .hair-cap {
+    position: absolute;
+    top: -2px; left: 50%;
+    width: 29px; height: 14px;
+    margin-left: -14.5px;
+    border-radius: 50% 50% 0 0;
+    z-index: 2;
+  }
+  /* swept: side-parted fringe, a triangular flick over one eye */
+  .view-2d .hair-cap.hair-swept {
+    height: 15px;
+    border-radius: 50% 50% 0 0;
+  }
+  .view-2d .hair-cap.hair-swept::after {
+    content: "";
+    position: absolute;
+    top: 9px; left: 3px;
+    width: 12px; height: 8px;
+    background: inherit;
+    clip-path: polygon(0 0, 100% 30%, 40% 100%);
+  }
+  /* undercut: short tight cap with a sharp straight line (shaved sides) */
+  .view-2d .hair-cap.hair-undercut {
+    height: 11px;
+    border-radius: 60% 60% 0 0;
+  }
+  .view-2d .hair-cap.hair-undercut::after {
+    content: "";
+    position: absolute;
+    top: 9px; left: -1px; right: -1px;
+    height: 2px;
+    background: inherit;
+    filter: brightness(0.7);
+    border-radius: 1px;
+  }
+  /* bald: no cap at all, just a soft scalp highlight */
+  .view-2d .hair-cap.hair-bald { display: none; }
+  .view-2d .hair-cap.hair-bald ~ .hair-shine { display: block; }
+  .view-2d .hair-shine {
+    display: none;
+    position: absolute;
+    top: 2px; left: 50%;
+    width: 10px; height: 5px;
+    margin-left: -5px;
+    background: rgba(255,255,255,0.35);
+    border-radius: 50%;
+  }
+  .view-2d .eye {
+    position: absolute;
+    top: 11px;
+    width: 2.6px; height: 2.6px;
+    border-radius: 50%;
+    background: #2a2f45;
+    transition: transform 0.15s ease, height 0.15s ease;
+  }
+  .view-2d .eye.l { left: 7px; } .view-2d .eye.r { right: 7px; }
+  .view-2d .brow {
+    position: absolute;
+    top: 7px;
+    width: 5px; height: 1.6px;
+    border-radius: 2px;
+    background: #2a2f45;
+    opacity: 0;
+    transition: all 0.15s ease;
+  }
+  .view-2d .brow.l { left: 5.5px; transform: rotate(18deg); }
+  .view-2d .brow.r { right: 5.5px; transform: rotate(-18deg); }
+  .view-2d .mouth {
+    position: absolute;
+    top: 17px; left: 50%;
+    width: 8px; height: 4px;
+    margin-left: -4px;
+    border: 1.4px solid #b5673f;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    transition: all 0.15s ease;
+  }
+  .view-2d .cheek {
+    position: absolute;
+    top: 14px;
+    width: 4px; height: 3px;
+    border-radius: 50%;
+    background: #ffb199;
+    opacity: 0.6;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+  .view-2d .cheek.l { left: 3px; } .view-2d .cheek.r { right: 3px; }
+  .view-2d .head-grp { position: absolute; inset: 0; transform-origin: 50% 85%; }
+
+  /* angry face: furrowed brows, squinted eyes, flat frowning mouth, flushed cheeks */
+  .view-2d .char.angry .brow { opacity: 1; }
+  .view-2d .char.angry .brow.l { transform: rotate(-14deg); }
+  .view-2d .char.angry .brow.r { transform: rotate(14deg); }
+  .view-2d .char.angry .eye { height: 1.6px; transform: translateY(1px); }
+  .view-2d .char.angry .mouth {
+    height: 3px;
+    border-radius: 8px 8px 0 0;
+    border: 1.4px solid #b5673f;
+    border-bottom: none;
+    transform: translateY(2px);
+  }
+  .view-2d .char.angry .cheek { background: #ff5c4d; opacity: 0.85; }
+
+  /* fallback colors by role, used only when no per-name color was chosen */
+  .view-2d .role-pm .torso, .view-2d .role-pm .arm { background: var(--pm); }
+  .view-2d .role-pm .collar, .view-2d .role-pm .hair-cap, .view-2d .role-pm .hair-side { background: var(--pm-dark); }
+  .view-2d .role-ba .torso, .view-2d .role-ba .arm { background: var(--ba); }
+  .view-2d .role-ba .collar, .view-2d .role-ba .hair-cap, .view-2d .role-ba .hair-side { background: var(--ba-dark); }
+  .view-2d .role-dev .torso, .view-2d .role-dev .arm { background: var(--dev); }
+  .view-2d .role-dev .collar, .view-2d .role-dev .hair-cap, .view-2d .role-dev .hair-side { background: var(--dev-dark); }
+  .view-2d .role-qc .torso, .view-2d .role-qc .arm { background: var(--qc); }
+  .view-2d .role-qc .collar, .view-2d .role-qc .hair-cap, .view-2d .role-qc .hair-side { background: var(--qc-dark); }
+
+  /* per-name overrides win via inline custom properties (JS supplies both shades) */
+  .view-2d .char[style*="--shirt"] .torso, .view-2d .char[style*="--shirt"] .arm { background: var(--shirt); }
+  .view-2d .char[style*="--shirt"] .collar { background: var(--shirt-dark); }
+  .view-2d .char[style*="--hair"] .hair-cap, .view-2d .char[style*="--hair"] .hair-side { background: var(--hair); }
+
+  .view-2d .excl {
+    position: absolute;
+    top: -10px; right: -4px;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--blocked);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    opacity: 0;
+    z-index: 6;
+  }
+
+  /* --- idle: stand up, step side to side in place, sit back down --- */
+  @keyframes idleCycle {
+    0%, 60%, 100% { transform: translateY(0) translateX(0) rotate(0deg); }
+    68% { transform: translateY(-3px) translateX(0) rotate(0deg); }
+    76% { transform: translateY(-3px) translateX(-5px) rotate(-4deg); }
+    84% { transform: translateY(-3px) translateX(5px) rotate(4deg); }
+    92% { transform: translateY(-3px) translateX(0) rotate(0deg); }
+  }
+  @keyframes idleSway { 0%, 100% { transform: rotate(-1deg); } 50% { transform: rotate(1deg); } }
+  .view-2d .st-idle .char { animation: idleCycle 7s ease-in-out infinite; }
+  .view-2d .st-idle .head-grp { animation: idleSway 3.4s ease-in-out infinite; }
+
+  /* --- working: bob + fast, visible typing arms --- */
+  @keyframes workBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes typeL { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(14deg); } }
+  @keyframes typeR { 0%, 100% { transform: rotate(14deg); } 50% { transform: rotate(-10deg); } }
+  .view-2d .st-working .char-body { animation: workBob 0.45s ease-in-out infinite; }
+  .view-2d .st-working .arm.left { animation: typeL 0.4s ease-in-out infinite; }
+  .view-2d .st-working .arm.right { animation: typeR 0.4s ease-in-out infinite; }
+  .view-2d .st-working .laptop .glow { animation: screenFlicker 1.1s steps(3) infinite; }
+  @keyframes screenFlicker { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.75; } }
+
+  /* --- reviewing: head tilts scanning a diff, one arm points --- */
+  @keyframes scanHead { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }
+  @keyframes pointArm { 0%, 100% { transform: rotate(-20deg); } 50% { transform: rotate(-4deg); } }
+  .view-2d .st-reviewing .head-grp { animation: scanHead 2s ease-in-out infinite; }
+  .view-2d .st-reviewing .arm.right { animation: pointArm 2s ease-in-out infinite; }
+
+  /* --- blocked: one arm raised high, shaking; exclamation pops --- */
+  @keyframes raiseArm { 0%, 100% { transform: rotate(-150deg); } 50% { transform: rotate(-168deg); } }
+  @keyframes popExcl { 0%, 100% { opacity: 0.5; transform: translateY(0) scale(0.92); } 50% { opacity: 1; transform: translateY(-4px) scale(1.08); } }
+  .view-2d .st-blocked .arm.right { animation: raiseArm 0.65s ease-in-out infinite; }
+  .view-2d .st-blocked .excl { animation: popExcl 0.65s ease-in-out infinite; }
+
+  /* --- done: stand up, wave, step away from the chair --- */
+  @keyframes doneCycle {
+    0%, 100% { transform: translateY(0) translateX(0); }
+    40%, 90% { transform: translateY(-4px) translateX(8px); }
+  }
+  @keyframes waveArm { 0%, 100% { transform: rotate(-100deg); } 50% { transform: rotate(-145deg); } }
+  .view-2d .st-done .char { animation: doneCycle 2.4s ease-in-out infinite; }
+  .view-2d .st-done .arm.right { animation: waveArm 0.55s ease-in-out infinite; }
+
+  /* longer hair for a feminine look: two side locks over the shoulders */
+  .view-2d .hair-side {
+    position: absolute;
+    top: 9px;
+    width: 6px; height: 20px;
+    border-radius: 0 0 4px 4px;
+    z-index: 0;
+  }
+  .view-2d .hair-side.l { left: -2px; }
+  .view-2d .hair-side.r { right: -2px; }
+
+  .view-2d .empty-office {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    padding: 50px 0;
+  }
+
+  /* hkt: tall boy-band spikes standing up from a short base */
+  .view-2d .hair-cap.hair-hkt {
+    top: -12px;
+    width: 31px; height: 24px;
+    margin-left: -15.5px;
+    border-radius: 0;
+    clip-path: polygon(0 100%, 3% 52%, 12% 66%, 17% 18%, 30% 50%, 40% 0, 52% 44%, 64% 6%, 74% 50%, 85% 20%, 90% 62%, 98% 48%, 100% 100%);
+  }
+  .view-2d .hair-cap.hair-hkt::after {
+    content: "";
+    position: absolute;
+    left: 36%; top: 8px;
+    width: 6px; height: 9px;
+    background: rgba(0,0,0,0.18);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  @media (max-width: 640px) {
+    .view-2d .floor { grid-template-columns: 1fr; padding: 20px 16px; }
+    .view-2d .zone-left, .view-2d .zone-mid, .view-2d .zone-right { grid-column: 1; }
+    .view-2d .zone-left .row, .view-2d .zone-right .row { max-width: none; }
+    .view-2d .window, .view-2d .shelf { display: none; }
+  }
+
+  @media (max-width: 480px) {
+    .view-2d .desk { width: 100px; }
+    .view-2d .scene { width: 92px; }
+    .view-2d .char { margin-left: -22px; width: 44px; }
+  }
+
+
+  /* ---- extra hairstyles (2D) ---- */
+  .view-2d .hair-x { position: absolute; z-index: 4; }
+  .view-2d .role-pm .hair-x { background: var(--pm-dark); }
+  .view-2d .role-ba .hair-x { background: var(--ba-dark); }
+  .view-2d .role-dev .hair-x { background: var(--dev-dark); }
+  .view-2d .role-qc .hair-x { background: var(--qc-dark); }
+  .view-2d .char[style*="--hair"] .hair-x { background: var(--hair); }
+  /* buzz (đầu đinh): a thin flat-top shell */
+  .view-2d .hair-cap.hair-buzz { top: -1px; width: 27px; height: 9px; margin-left: -13.5px; border-radius: 45% 45% 0 0 / 70% 70% 0 0; }
+  /* mohawk: one spiky strip down the middle */
+  .view-2d .hair-cap.hair-mohawk {
+    top: -11px; width: 8px; height: 17px; margin-left: -4px; border-radius: 0;
+    clip-path: polygon(0 100%, 0 30%, 25% 45%, 30% 0, 55% 35%, 70% 5%, 100% 40%, 100% 100%);
+  }
+  /* topknot (búi samurai): slick cap + bun + dark tie */
+  .view-2d .hair-cap.hair-topknot { height: 13px; }
+  .view-2d .hair-cap.hair-topknot::before {
+    content: ""; position: absolute; left: 50%; top: -8px;
+    width: 11px; height: 10px; margin-left: -5.5px; border-radius: 50%; background: inherit;
+  }
+  .view-2d .hair-cap.hair-topknot::after {
+    content: ""; position: absolute; left: 50%; top: 0;
+    width: 9px; height: 2.5px; margin-left: -4.5px; border-radius: 2px; background: #2a2f45;
+  }
+  /* afro: big round volume with lumpy sides */
+  .view-2d .hair-cap.hair-afro { top: -11px; width: 40px; height: 32px; margin-left: -20px; border-radius: 50%; }
+  .view-2d .hair-cap.hair-afro::before, .view-2d .hair-cap.hair-afro::after {
+    content: ""; position: absolute; top: 7px; width: 14px; height: 14px; border-radius: 50%; background: inherit;
+  }
+  .view-2d .hair-cap.hair-afro::before { left: -4px; }
+  .view-2d .hair-cap.hair-afro::after { right: -4px; }
+  /* curly (xoăn mì tôm): scalloped curls along the top */
+  .view-2d .hair-cap.hair-curly {
+    top: -5px; width: 31px; height: 16px; margin-left: -15.5px; border-radius: 40% 40% 0 0;
+    -webkit-mask: radial-gradient(circle at 3.5px 3.5px, #000 3.2px, transparent 3.6px) 0 0 / 7px 7px repeat-x,
+                  linear-gradient(#000, #000) 0 3.5px / 100% 100% no-repeat;
+    mask: radial-gradient(circle at 3.5px 3.5px, #000 3.2px, transparent 3.6px) 0 0 / 7px 7px repeat-x,
+          linear-gradient(#000, #000) 0 3.5px / 100% 100% no-repeat;
+  }
+  /* ponytail (đuôi ngựa): a tail swinging out behind the head */
+  .view-2d .hair-x.tail {
+    z-index: 1; top: 6px; right: 0; width: 7px; height: 17px;
+    border-radius: 4px 4px 6px 6px; transform-origin: 50% 0;
+    animation: tailSwing 1.8s ease-in-out infinite;
+  }
+  @keyframes tailSwing { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(-38deg); } }
+  /* braids (2 bím): two braids hanging at the sides */
+  .view-2d .hair-x.braid {
+    top: 11px; width: 6px; height: 19px; border-radius: 3px; transform-origin: 50% 0;
+    animation: braidSwing 2.4s ease-in-out infinite;
+  }
+  .view-2d .hair-x.braid.l { left: 1px; }
+  .view-2d .hair-x.braid.r { right: 1px; animation-delay: -1.2s; }
+  .view-2d .hair-x.braid::after {
+    content: ""; position: absolute; inset: 0; border-radius: 3px;
+    background: repeating-linear-gradient(180deg, transparent 0 3px, rgba(0,0,0,0.22) 3px 4.5px);
+  }
+  @keyframes braidSwing { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+  /* balding (hói giữa): shiny crown, tufts on the sides */
+  .view-2d .hair-cap.hair-balding { display: none; }
+  .view-2d .hair-cap.hair-balding ~ .hair-shine { display: block; }
+  .view-2d .hair-x.tuft { top: 5px; width: 5px; height: 10px; border-radius: 3px 1px 3px 4px; }
+  .view-2d .hair-x.tuft.l { left: 4px; }
+  .view-2d .hair-x.tuft.r { right: 4px; border-radius: 1px 3px 4px 3px; }
+  /* bowl (mái ngố): bowl cut + blunt fringe over the forehead */
+  .view-2d .hair-cap.hair-bowl { top: -3px; width: 30px; height: 14px; margin-left: -15px; border-radius: 50% 50% 0 0 / 90% 90% 0 0; }
+  .view-2d .hair-x.fringe { top: -1px; left: 50%; width: 26px; height: 9px; margin-left: -13px; border-radius: 13px 13px 1px 1px; }
+
+  /* ---- dozing (2D): head droops, eyes closed, "Z z z" bubble ---- */
+  .view-2d .desk.dozing .char, .view-2d .desk.dozing .arm { animation: none; }
+  .view-2d .desk.dozing .head-grp { animation: none; transform: rotate(12deg) translateY(2px); }
+  .view-2d .desk.dozing .eye { height: 1px; width: 4px; border-radius: 1px; transform: translateY(1px); }
+  .view-2d .bubble.zzz {
+    color: var(--muted); font-style: italic; font-weight: 800; letter-spacing: 1px;
+    animation: zzzFloat 2.4s ease-in-out infinite;
+  }
+  @keyframes zzzFloat { 0%, 100% { transform: translateY(0); opacity: 0.7; } 50% { transform: translateY(-2px); opacity: 1; } }
+
+  /* ---- celebration (2D): confetti on the finished desk, everyone else claps ---- */
+  .view-2d .desk.clapping .arm.left { animation: clapL 0.22s ease-in-out infinite; }
+  .view-2d .desk.clapping .arm.right { animation: clapR 0.22s ease-in-out infinite; }
+  @keyframes clapL { 0%, 100% { transform: rotate(-55deg); } 50% { transform: rotate(-88deg); } }
+  @keyframes clapR { 0%, 100% { transform: rotate(55deg); } 50% { transform: rotate(88deg); } }
+  .view-2d .confetti { position: absolute; left: 50%; top: 34px; width: 0; height: 0; z-index: 8; pointer-events: none; }
+  .view-2d .confetti i {
+    position: absolute; left: 0; top: 0; width: 6px; height: 4px; border-radius: 1px; opacity: 0;
+    animation: confettiFly 1.7s cubic-bezier(0.2, 0.6, 0.4, 1) forwards; animation-delay: var(--d);
+  }
+  @keyframes confettiFly {
+    0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+    40% { opacity: 1; transform: translate(calc(var(--dx) * 0.6), calc(var(--dy) * 0.2 - 30px)) rotate(calc(var(--r) * 0.5)); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)); }
+  }
+
+  /* ---- session picker ---- */
+  .session-picker {
+    font: 700 0.72rem "Nunito", sans-serif;
+    border: 1px solid var(--paper-edge);
+    border-radius: 999px;
+    background: var(--paper);
+    color: var(--ink);
+    padding: 4px 8px;
+    max-width: 160px;
+  }
+  .session-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #session-label { margin-left: 6px; opacity: 0.85; }
+
+  /* ================= shared chrome ================= */
+
+  footer.note {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.68rem;
+    margin-top: 14px;
+  }
+
+  .names-toggle {
+    display: block;
+    margin: 10px auto 0;
+    background: none;
+    border: 1px solid var(--paper-edge);
+    color: var(--muted);
+    font-size: 0.7rem;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .names-toggle:hover { color: var(--ink); }
+
+  .names-panel {
+    margin-top: 10px;
+    border: 1px solid var(--paper-edge);
+    border-radius: 14px;
+    padding: 14px 16px;
+    background: var(--paper);
+  }
+  .names-panel[hidden] { display: none; }
+  .names-hint { font-size: 0.68rem; color: var(--muted); margin: 0 0 10px; }
+  .names-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 480px) { .names-grid { grid-template-columns: 1fr; } }
+  .names-group { min-width: 0; }
+  .names-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .names-group h3 {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0; color: var(--muted);
+  }
+  .default-count {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 0.62rem; color: var(--muted);
+  }
+  .default-count input {
+    width: 40px; font-size: 0.72rem; padding: 2px 4px;
+    border-radius: 6px; border: 1px solid var(--paper-edge);
+    background: var(--bg); color: var(--ink);
+  }
+  .names-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .names-list li {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 0.78rem; background: var(--bg); border-radius: 8px; padding: 4px 8px;
+  }
+  .names-list .idx { color: var(--muted); font-size: 0.68rem; min-width: 1.4em; }
+  .names-list .entry-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .names-list .entry-gender {
+    font-size: 0.68rem; border: 1px solid var(--paper-edge); border-radius: 6px;
+    background: var(--paper); color: var(--ink); padding: 1px 2px;
+  }
+  .names-list .entry-swatch {
+    width: 20px; height: 20px; padding: 0; border: 1px solid var(--paper-edge);
+    border-radius: 5px; background: none; cursor: pointer;
+  }
+  .names-list button { border: none; background: none; color: var(--blocked); cursor: pointer; font-size: 0.78rem; line-height: 1; padding: 2px 4px; }
+  .names-add { display: flex; gap: 6px; }
+  .names-add input {
+    flex: 1; min-width: 0; font-size: 0.78rem; padding: 5px 8px; border-radius: 8px;
+    border: 1px solid var(--paper-edge); background: var(--bg); color: var(--ink);
+  }
+  .names-add button {
+    font-size: 0.72rem; padding: 5px 10px; border-radius: 8px; border: none;
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  .office-name-field { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--muted); margin: 0 0 10px; }
+  .office-name-field input { flex: 0 1 240px; min-width: 0; font-size: 0.78rem; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--paper-edge); background: var(--bg); color: var(--ink); }
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=Nunito:wght@500;700&display=swap" rel="stylesheet">
+
+<div class="page">
+  <header class="top">
+    <div>
+      <h1 id="office-title">Agent Office</h1>
+      <p class="sub">Who's at their desk right now — a live view, not a control panel.<span id="session-label" hidden></span></p>
+    </div>
+    <div class="top-right">
+      <div class="legend">
+        <span><i style="background:var(--idle)"></i>idle</span>
+        <span><i style="background:var(--working)"></i>working</span>
+        <span><i style="background:var(--reviewing)"></i>reviewing</span>
+        <span><i style="background:var(--done)"></i>done</span>
+        <span><i style="background:var(--blocked)"></i>blocked</span>
+      </div>
+      <select class="session-picker" id="session-picker" aria-label="Session"><option value="">All sessions</option></select>
+      <div class="view-switch" id="view-switch" role="group" aria-label="Office view">
+        <button type="button" data-view="2d" aria-pressed="false">2D</button>
+        <button type="button" data-view="3d" aria-pressed="true">3D</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="office view-2d" id="office-2d" hidden>
+    <div class="wall">
+      <div class="window"></div>
+      <div class="clock"></div>
+      <div class="shelf" id="shelf"></div>
+      <div class="plant">
+        <div class="leaves">
+          <div class="leaf"></div><div class="leaf"></div><div class="leaf"></div>
+        </div>
+        <div class="pot"></div>
+      </div>
+      <div class="row" id="row-pm"></div>
+    </div>
+    <div class="floor">
+      <div class="zone zone-left"><div class="row" id="row-dev"></div></div>
+      <div class="zone zone-mid"><div class="row" id="row-ba"></div></div>
+      <div class="zone zone-right"><div class="row" id="row-qc"></div></div>
+      <div class="empty-office" id="empty-msg-2d" hidden>Nobody's at a desk right now.</div>
+    </div>
+  </div>
+
+  <div class="office view-3d" id="office-3d">
+    <div class="stage" id="stage">
+      <div class="labels" id="labels"></div>
+      <div class="empty-office" id="empty-msg" hidden>Nobody's at a desk right now.</div>
+      <div class="hint">Drag to look around · scroll to zoom · right-click someone</div>
+      <div class="ctx-menu" id="ctx-menu" hidden><button type="button" id="ctx-punch" title="Punch" aria-label="Punch">👊</button><button type="button" class="gang" id="ctx-gang" title="Gang punch" aria-label="Gang punch">👊👊</button><button type="button" id="ctx-paper" title="Throw paper" aria-label="Throw paper">📄</button></div>
+      <div class="pick-hint" id="pick-hint" hidden>Pick who to punch · Esc to cancel</div>
+    </div>
+  </div>
+
+  <footer class="note">Updates when the coordinator dispatches or reviews work. Desks fade when a status hasn't changed in a while.</footer>
+
+  <button class="names-toggle" id="names-toggle" type="button" aria-expanded="false">Name the team</button>
+  <div class="names-panel" id="names-panel" hidden>
+    <label class="office-name-field">Office name <input type="text" id="office-name-input" maxlength="40" placeholder="Agent Office"></label>
+    <p class="names-hint">"default" sets how many idle desks show for a role before any real work is dispatched (0 hides it). Give each role a list of names, in order — the 1st Dev desk gets the 1st name, and so on. Pick a gender (M/F), a hairstyle, and hair/shirt colors per name. Saved only in this browser.</p>
+    <div class="names-grid" id="names-grid"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  ["names", "default-counts", "view"].forEach(function (k) {
+    try {
+      var old = localStorage.getItem("magicspinui-office-" + k);
+      if (old !== null && localStorage.getItem("agent-office-" + k) === null) localStorage.setItem("agent-office-" + k, old);
+    } catch (e) {}
+  });
+})();
+</script>
+<script>
+(function () {
+  var STALE_MS = 15 * 60 * 1000;
+
+  var EXAMPLE_DESKS = [
+    { id: 'main-pm', role: 'PM', status: 'reviewing', label: 'reviewing Dev A diff', session: 'main', updatedAt: new Date().toISOString() },
+    { id: 'main-dev-a', role: 'Dev', status: 'working', label: 'app.component.ts', session: 'main', updatedAt: new Date().toISOString() },
+    { id: 'main-dev-b', role: 'Dev', status: 'done', label: 'sky.ts', session: 'main', updatedAt: new Date().toISOString() },
+    { id: 'main-dev-c', role: 'Dev', status: 'blocked', label: 'waiting on PM', session: 'main', updatedAt: new Date().toISOString() },
+    { id: 'main-qc', role: 'QC', status: 'idle', label: '', session: 'main', updatedAt: new Date().toISOString() }
+  ];
+
+  var desksById = {};
+  var usingExample = true;
+  var ROLES = ['PM', 'BA', 'Dev', 'QC'];
+  var NAMES_KEY = 'agent-office-names';
+
+  var HAIR_STYLES = ['cap', 'swept', 'undercut', 'bald', 'hkt',
+    'buzz', 'mohawk', 'topknot', 'afro', 'curly', 'ponytail', 'braids', 'balding', 'bowl'];
+  var HAIR_STYLE_LABELS = {
+    cap: 'Cap', swept: 'Swept', undercut: 'Undercut', bald: 'Bald', hkt: 'HKT',
+    buzz: 'Đầu đinh', mohawk: 'Mohawk', topknot: 'Búi samurai', afro: 'Afro', curly: 'Xoăn mì tôm',
+    ponytail: 'Đuôi ngựa', braids: '2 bím', balding: 'Hói giữa', bowl: 'Mái ngố'
+  };
+  // F side locks would clash with these (shaved / tied back / already hanging at the sides)
+  var NO_SIDE_LOCKS = { bald: 1, balding: 1, buzz: 1, mohawk: 1, braids: 1, ponytail: 1, afro: 1 };
+
+  function loadNames() {
+    try {
+      var raw = localStorage.getItem(NAMES_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object') parsed = {};
+      ROLES.forEach(function (r) { if (!Array.isArray(parsed[r])) parsed[r] = []; });
+      return parsed;
+    } catch (e) {
+      var empty = {};
+      ROLES.forEach(function (r) { empty[r] = []; });
+      return empty;
+    }
+  }
+  function saveNames(n) { try { localStorage.setItem(NAMES_KEY, JSON.stringify(n)); } catch (e) {} }
+
+  var names = loadNames();
+
+  function currentDesks() {
+    return Object.keys(desksById).length ? Object.values(desksById) : EXAMPLE_DESKS;
+  }
+
+  function renderNamesPanel() {
+    var grid = document.getElementById('names-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    ROLES.forEach(function (role) {
+      var group = document.createElement('div');
+      group.className = 'names-group';
+
+      var h3row = document.createElement('div');
+      h3row.className = 'names-group-head';
+      var h3 = document.createElement('h3');
+      h3.textContent = role;
+      var countWrap = document.createElement('label');
+      countWrap.className = 'default-count';
+      countWrap.title = 'Default desks shown even with no work dispatched';
+      var countLabelText = document.createElement('span');
+      countLabelText.textContent = 'default';
+      var countInput = document.createElement('input');
+      countInput.type = 'number';
+      countInput.min = '0';
+      countInput.max = '20';
+      countInput.value = defaultCounts[role] != null ? defaultCounts[role] : 0;
+      countInput.addEventListener('change', function () {
+        var n = parseInt(countInput.value, 10);
+        defaultCounts[role] = isNaN(n) || n < 0 ? 0 : Math.min(n, 20);
+        countInput.value = defaultCounts[role];
+        saveDefaultCounts(defaultCounts);
+        render(currentDesks());
+      });
+      countWrap.append(countLabelText, countInput);
+      h3row.append(h3, countWrap);
+      group.appendChild(h3row);
+
+      var list = document.createElement('ul');
+      list.className = 'names-list';
+      (names[role] || []).forEach(function (raw, i) {
+        var entry = typeof raw === 'string' ? { name: raw } : raw;
+        var li = document.createElement('li');
+        li.className = 'name-entry';
+
+        var idx = document.createElement('span');
+        idx.className = 'idx';
+        idx.textContent = (i + 1) + '.';
+
+        var label = document.createElement('span');
+        label.textContent = entry.name;
+        label.className = 'entry-name';
+
+        var genderSel = document.createElement('select');
+        genderSel.className = 'entry-gender';
+        ['m', 'f'].forEach(function (g) {
+          var opt = document.createElement('option');
+          opt.value = g;
+          opt.textContent = g === 'f' ? 'F' : 'M';
+          if ((entry.gender || 'm') === g) opt.selected = true;
+          genderSel.appendChild(opt);
+        });
+        genderSel.addEventListener('change', function () {
+          entry.gender = genderSel.value;
+          names[role][i] = entry;
+          saveNames(names);
+          render(currentDesks());
+        });
+
+        var styleSel = document.createElement('select');
+        styleSel.className = 'entry-gender';
+        styleSel.title = 'Hairstyle';
+        HAIR_STYLES.forEach(function (s) {
+          var opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = HAIR_STYLE_LABELS[s];
+          if ((entry.hairStyle || 'cap') === s) opt.selected = true;
+          styleSel.appendChild(opt);
+        });
+        styleSel.addEventListener('change', function () {
+          entry.hairStyle = styleSel.value;
+          names[role][i] = entry;
+          saveNames(names);
+          render(currentDesks());
+        });
+
+        var hairInput = document.createElement('input');
+        hairInput.type = 'color';
+        hairInput.className = 'entry-swatch';
+        hairInput.title = 'Hair color';
+        hairInput.value = entry.hair || '#4a3524';
+        hairInput.addEventListener('input', function () {
+          entry.hair = hairInput.value;
+          names[role][i] = entry;
+          saveNames(names);
+          render(currentDesks());
+        });
+
+        var shirtInput = document.createElement('input');
+        shirtInput.type = 'color';
+        shirtInput.className = 'entry-swatch';
+        shirtInput.title = 'Shirt color';
+        shirtInput.value = entry.shirt || '#6c7ee8';
+        shirtInput.addEventListener('input', function () {
+          entry.shirt = shirtInput.value;
+          names[role][i] = entry;
+          saveNames(names);
+          render(currentDesks());
+        });
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.textContent = '✕';
+        del.addEventListener('click', function () {
+          names[role].splice(i, 1);
+          saveNames(names);
+          renderNamesPanel();
+          render(currentDesks());
+        });
+
+        li.append(idx, label, genderSel, styleSel, hairInput, shirtInput, del);
+        list.appendChild(li);
+      });
+      group.appendChild(list);
+
+      var addRow = document.createElement('div');
+      addRow.className = 'names-add';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Add a name';
+      var addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.textContent = 'Add';
+      function addName() {
+        var val = input.value.trim();
+        if (!val) return;
+        names[role].push({ name: val, gender: 'm', hairStyle: 'cap', hair: '#4a3524', shirt: '#6c7ee8' });
+        saveNames(names);
+        input.value = '';
+        renderNamesPanel();
+        render(currentDesks());
+      }
+      addBtn.addEventListener('click', addName);
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') addName(); });
+      addRow.append(input, addBtn);
+      group.appendChild(addRow);
+
+      grid.appendChild(group);
+    });
+  }
+
+  // A name entry is { name, gender: 'f'|'m', hairStyle, hair: '#rrggbb', shirt: '#rrggbb' }.
+  // Older saved data may be a plain string — normalize on read.
+  function entryFor(canon, indexWithinRole) {
+    var list = names[canon] || [];
+    var raw = list[indexWithinRole];
+    if (!raw) return null;
+    if (typeof raw === 'string') return { name: raw };
+    return raw;
+  }
+
+  function canonicalRole(role) {
+    var r = (role || '').toLowerCase();
+    if (r === 'pm') return 'PM';
+    if (r === 'ba') return 'BA';
+    if (r === 'qc') return 'QC';
+    return 'Dev';
+  }
+
+  function statusClass(status) { return 'st-' + (status || 'idle'); }
+
+  // Censored outbursts — role + status flavored, never real profanity, just
+  // ***-style venting for a hard Dev task, a QC bug, or a PM who's annoyed.
+  var OUTBURSTS = {
+    Dev: {
+      working: ['@#$% this bug!!', 'why won\'t it %&*#ing compile', 'ugh, #@!* edge case'],
+      blocked: ['%&#@... stuck AGAIN', 'this @#$% merge conflict', 'who wrote this #*&%']
+    },
+    QC: {
+      working: ['found another $#@% bug', 'are you %&*#ing kidding me', 'not AGAIN, #@!*'],
+      blocked: ['%&#@ it\'s broken everywhere', 'this build is #*&% cursed']
+    },
+    PM: {
+      reviewing: ['seriously, %&#@?', 'this is not what I #@!* asked for', 'ugh, @#$% scope creep'],
+      blocked: ['%&#@ deadline...', 'why is EVERYTHING #*&% late']
+    }
+  };
+  var OUTBURST_CHANCE = 0.2;
+
+  function maybeOutburst(canon, status) {
+    var pool = (OUTBURSTS[canon] || {})[status];
+    if (!pool || !pool.length) return null;
+    if (Math.random() > OUTBURST_CHANCE) return null;
+    return pool[(Math.random() * pool.length) | 0];
+  }
+
+  // Darken a #rrggbb hex color for the collar / hair shade.
+  function shade(hex, amount) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return hex;
+    var n = parseInt(m[1], 16);
+    var r = Math.max(0, ((n >> 16) & 255) * amount);
+    var g = Math.max(0, ((n >> 8) & 255) * amount);
+    var b = Math.max(0, (n & 255) * amount);
+    return 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ')';
+  }
+
+  // The office always shows at least a configured number of PM/Dev/QC desks,
+  // even with nobody dispatched yet — they sit idle until real work shows
+  // up. BA has no default seat (matches AGENTS.md: BA is dispatched only per
+  // feature batch, not a permanent seat) unless the user sets one > 0.
+  var PLACEHOLDER_ROLES = ['PM', 'BA', 'Dev', 'QC'];
+  var DEFAULT_COUNT_KEY = 'agent-office-default-counts';
+  var DEFAULT_COUNTS_FALLBACK = { PM: 1, BA: 0, Dev: 1, QC: 1 };
+
+  function loadDefaultCounts() {
+    try {
+      var raw = localStorage.getItem(DEFAULT_COUNT_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object') parsed = {};
+      var out = {};
+      PLACEHOLDER_ROLES.forEach(function (r) {
+        var n = parseInt(parsed[r], 10);
+        out[r] = isNaN(n) || n < 0 ? DEFAULT_COUNTS_FALLBACK[r] : Math.min(n, 20);
+      });
+      return out;
+    } catch (e) {
+      return Object.assign({}, DEFAULT_COUNTS_FALLBACK);
+    }
+  }
+  function saveDefaultCounts(c) { try { localStorage.setItem(DEFAULT_COUNT_KEY, JSON.stringify(c)); } catch (e) {} }
+
+  var defaultCounts = loadDefaultCounts();
+
+  function withPlaceholders(desks) {
+    var counts = {};
+    desks.forEach(function (d) {
+      var canon = canonicalRole(d.role);
+      counts[canon] = (counts[canon] || 0) + 1;
+    });
+    var result = desks.slice();
+    PLACEHOLDER_ROLES.forEach(function (canon) {
+      var want = defaultCounts[canon] || 0;
+      var have = counts[canon] || 0;
+      for (var i = have; i < want; i++) {
+        result.push({
+          id: 'placeholder-' + canon.toLowerCase() + '-' + i,
+          role: canon,
+          status: 'idle',
+          label: '',
+          placeholder: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    });
+    return result;
+  }
+
+  /* ================================================================
+     3D office
+     ================================================================ */
+  var office3d = (window.THREE ? createOffice3d() : null);
+  if (!office3d) {
+    var fb = document.createElement('div');
+    fb.className = 'fallback';
+    fb.textContent = 'The 3D office could not load (three.js is unavailable).';
+    document.getElementById('stage').appendChild(fb);
+  }
+
+  function createOffice3d() {
+    var THREE = window.THREE;
+    var stage = document.getElementById('stage');
+    var labelsLayer = document.getElementById('labels');
+    var PI = Math.PI;
+
+    // ---- layout constants (world units ~ metres) ----
+    var CW = 2.3;          // desk cell width
+    var CD = 2.5;          // desk cell depth (row spacing)
+    var LOFT_H = 1.0;      // PM loft height
+    var LD = 2.9;          // loft depth
+    var WALL_H = 4.0;
+    var DESK_Y = 0.76;     // desk top surface
+    var SIT_HIP = 0.56;
+    var STAND_HIP = 0.63;
+
+    // ---- renderer / scene / camera ----
+    var renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
+    } catch (e) {
+      return null;
+    }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    stage.insertBefore(renderer.domElement, stage.firstChild);
+
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
+    var fitCam = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
+    scene.fog = new THREE.Fog(0xffffff, 60, 160);
+
+    var hemi = new THREE.HemisphereLight(0xffffff, 0x8890b0, 0.85);
+    scene.add(hemi);
+    var sun = new THREE.DirectionalLight(0xffffff, 0.6);
+    sun.position.set(6, 12, 9);
+    scene.add(sun);
+
+    var controls = null;
+    if (THREE.OrbitControls) {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enablePan = false;
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = 0.6;
+      controls.zoomSpeed = 0.8;
+      controls.minPolarAngle = 0.45;
+      controls.maxPolarAngle = 1.32;           // never below the floor
+      controls.minAzimuthAngle = -0.75;        // walls stay behind the room
+      controls.maxAzimuthAngle = 1.25;
+      controls.addEventListener('start', function () { anim = null; userMoved = true; });
+    }
+
+    // ---- theme ----
+    var theme = null;
+    var themeStamp = 0;
+    function readTheme() {
+      var cs = getComputedStyle(document.documentElement);
+      function v(n, f) { var s = cs.getPropertyValue(n).trim(); return s || f; }
+      var t = {
+        bg: v('--bg', '#eef1f6'), floorA: v('--floor-a', '#dfe6f3'), floorB: v('--floor-b', '#cfd9ee'),
+        wallA: v('--wall-a', '#aab8dd'), wallB: v('--wall-b', '#8fa0d1'),
+        ink: v('--ink', '#2a2f45'), paper: v('--paper', '#ffffff'),
+        wood: v('--wood', '#c89a6b'), woodDark: v('--wood-dark', '#a6794f'),
+        skin: v('--skin', '#ffd9ad'), working: v('--working', '#2fae6b'), glass: v('--glass', '#bfdcff'),
+        role: {
+          PM: { main: v('--pm', '#6c7ee8'), dark: v('--pm-dark', '#4a59c2') },
+          BA: { main: v('--ba', '#2fb3a1'), dark: v('--ba-dark', '#1f8f80') },
+          Dev: { main: v('--dev', '#ff8a5c'), dark: v('--dev-dark', '#e2683a') },
+          QC: { main: v('--qc', '#e85c9c'), dark: v('--qc-dark', '#c23f7c') }
+        }
+      };
+      var c = new THREE.Color(t.bg);
+      t.dark = (c.r + c.g + c.b) < 1.2;
+      return t;
+    }
+
+    // ---- shared geometry ----
+    var G = {};
+    G.box = new THREE.BoxGeometry(1, 1, 1);
+    G.cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 14);
+    G.head = new THREE.SphereGeometry(0.34, 20, 14);
+    G.torso = new THREE.CylinderGeometry(0.21, 0.27, 0.46, 12);
+    G.collar = new THREE.CylinderGeometry(0.2, 0.235, 0.08, 12);
+    G.arm = new THREE.CylinderGeometry(0.075, 0.07, 0.34, 8); G.arm.translate(0, -0.17, 0);
+    G.hand = new THREE.SphereGeometry(0.085, 10, 8);
+    G.leg = new THREE.CylinderGeometry(0.095, 0.085, 0.5, 8); G.leg.translate(0, -0.25, 0);
+    G.shoe = new THREE.SphereGeometry(0.1, 10, 8);
+    G.eye = new THREE.SphereGeometry(0.045, 10, 8);
+    G.cheek = new THREE.SphereGeometry(0.055, 10, 8);
+    G.mouth = new THREE.TorusGeometry(0.055, 0.014, 6, 12, PI);
+    G.brow = new THREE.BoxGeometry(0.12, 0.028, 0.025);
+    G.cap = new THREE.SphereGeometry(0.365, 18, 10, 0, PI * 2, 0, PI * 0.55);
+    G.capShort = new THREE.SphereGeometry(0.36, 18, 8, 0, PI * 2, 0, PI * 0.36);
+    G.capHkt = new THREE.SphereGeometry(0.36, 16, 8, 0, PI * 2, 0, PI * 0.42);
+    G.ring = new THREE.TorusGeometry(0.32, 0.028, 6, 22);
+    G.fringe = new THREE.ConeGeometry(0.13, 0.36, 4);
+    G.spike = new THREE.ConeGeometry(0.1, 0.5, 6); G.spike.translate(0, 0.25, 0);
+    G.lock = new THREE.CylinderGeometry(0.07, 0.095, 0.56, 8);
+    G.shine = new THREE.SphereGeometry(0.1, 8, 6);
+    G.disc = new THREE.CircleGeometry(0.5, 20);
+    G.plane = new THREE.PlaneGeometry(1, 1);
+    G.leaf = new THREE.SphereGeometry(0.12, 8, 6); G.leaf.scale(0.85, 3, 0.35); G.leaf.translate(0, 0.33, 0);
+    G.handBar = new THREE.BoxGeometry(1, 1, 1); G.handBar.translate(0, 0.5, 0);
+    G.torus = new THREE.TorusGeometry(0.42, 0.05, 6, 28);
+    G.unibrow = new THREE.BoxGeometry(0.2, 0.06, 0.04);
+    G.flame = new THREE.ConeGeometry(0.1, 0.42, 7); G.flame.translate(0, 0.21, 0);
+    G.puff = new THREE.SphereGeometry(0.08, 8, 6);
+    G.xbar = new THREE.BoxGeometry(0.11, 0.024, 0.02);
+    // extra hairstyles
+    G.capBuzz = new THREE.SphereGeometry(0.348, 18, 8, 0, PI * 2, 0, PI * 0.4);
+    G.bowl = new THREE.SphereGeometry(0.372, 20, 10, 0, PI * 2, 0, PI * 0.5);
+    G.afro = new THREE.SphereGeometry(0.47, 16, 10, 0, PI * 2, 0, PI * 0.55);
+    G.afroPuff = new THREE.SphereGeometry(0.17, 10, 8);
+    G.curl = new THREE.SphereGeometry(0.075, 7, 5);
+    G.bun = new THREE.SphereGeometry(0.13, 12, 10);
+    G.tie = new THREE.TorusGeometry(0.075, 0.022, 6, 14);
+    G.tail = new THREE.CylinderGeometry(0.075, 0.035, 0.42, 8); G.tail.translate(0, -0.21, 0);
+    G.bead = new THREE.SphereGeometry(0.062, 8, 6);
+    G.sideRing = new THREE.TorusGeometry(0.315, 0.075, 6, 20, PI * 1.4);
+    // paper ball + confetti
+    G.paper = new THREE.IcosahedronGeometry(0.085, 0);
+    G.confetti = new THREE.PlaneGeometry(0.07, 0.045);
+
+    // shared rage / dizzy effect materials (always on top of the scene's own colors)
+    var FX = {
+      flameOuter: new THREE.MeshBasicMaterial({ color: 0xff6a1f, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false }),
+      flameInner: new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
+      steam: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }),
+      teeth: null,
+      star: null
+    };
+    FX.teeth = new THREE.MeshBasicMaterial({ map: (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 128; cv.height = 40;
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#7a2a1a';
+      ctx.fillRect(0, 0, 128, 40);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(4, 4, 120, 32);
+      ctx.fillStyle = '#5a3a3a';
+      ctx.fillRect(4, 19, 120, 2);
+      for (var x = 19; x < 124; x += 15) ctx.fillRect(x, 4, 2, 32);
+      return new THREE.CanvasTexture(cv);
+    })() });
+    FX.star = new THREE.SpriteMaterial({ map: (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 64;
+      var ctx = cv.getContext('2d');
+      ctx.font = '900 54px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#b8860b';
+      ctx.strokeText('★', 32, 34);
+      ctx.fillStyle = '#ffd84a';
+      ctx.fillText('★', 32, 34);
+      return new THREE.CanvasTexture(cv);
+    })(), transparent: true, depthWrite: false });
+    var RAGE_SKIN = new THREE.Color('#ff4a2e');
+    FX.zzz = new THREE.SpriteMaterial({ map: (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 64;
+      var ctx = cv.getContext('2d');
+      ctx.font = 'italic 900 50px "Nunito", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#3a4266';
+      ctx.strokeText('Z', 32, 34);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('Z', 32, 34);
+      return new THREE.CanvasTexture(cv);
+    })(), transparent: true, depthWrite: false });
+    var CONFETTI_COLORS = ['#ff5c5c', '#ffd84a', '#4fc3f7', '#7bd88f', '#e85c9c', '#b388ff'];
+    var confettiMats = CONFETTI_COLORS.map(function (c) {
+      return new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide });
+    });
+
+    // ---- canvas textures ----
+    var texCache = {};
+    function textTexture(key, w, h, draw) {
+      var k = key + '|' + themeStamp;
+      if (texCache[k]) return texCache[k];
+      var cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      draw(cv.getContext('2d'), w, h);
+      var tex = new THREE.CanvasTexture(cv);
+      tex.anisotropy = 2;
+      texCache[k] = tex;
+      return tex;
+    }
+    function clearTexCache() {
+      Object.keys(texCache).forEach(function (k) { texCache[k].dispose(); });
+      texCache = {};
+    }
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    function plateTexture(text) {
+      return textTexture('plate:' + text, 256, 88, function (ctx, w, h) {
+        var bg = theme.dark ? theme.paper : theme.ink;
+        var fg = theme.dark ? theme.ink : theme.paper;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = bg;
+        roundRect(ctx, 4, 4, w - 8, h - 8, 16);
+        ctx.fill();
+        ctx.fillStyle = fg;
+        ctx.font = '800 46px "Baloo 2", "Nunito", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, w / 2, h / 2 + 3);
+      });
+    }
+    var exclTex = (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 96;
+      var ctx = cv.getContext('2d');
+      ctx.font = '900 84px "Nunito", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = '#ffffff';
+      ctx.strokeText('!', 32, 52);
+      ctx.fillStyle = '#e8483f';
+      ctx.fillText('!', 32, 52);
+      return new THREE.CanvasTexture(cv);
+    })();
+
+    // floor planks + wall gradient (redrawn on theme change)
+    var floorCanvas = document.createElement('canvas');
+    floorCanvas.width = 128; floorCanvas.height = 128;
+    var floorTex = new THREE.CanvasTexture(floorCanvas);
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.anisotropy = 4;
+    var wallCanvas = document.createElement('canvas');
+    wallCanvas.width = 4; wallCanvas.height = 128;
+    var wallTex = new THREE.CanvasTexture(wallCanvas);
+    function paintRoomTextures() {
+      var ctx = floorCanvas.getContext('2d');
+      ctx.fillStyle = theme.floorA;
+      ctx.fillRect(0, 0, 128, 128);
+      ctx.fillStyle = theme.floorB;
+      for (var i = 0; i < 4; i++) {
+        ctx.fillRect(i * 32, 0, 3, 128);
+        var off = (i % 2) * 64 + 20;
+        ctx.fillRect(i * 32, off, 32, 2);
+      }
+      floorTex.needsUpdate = true;
+      var w = wallCanvas.getContext('2d');
+      var g = w.createLinearGradient(0, 0, 0, 128);
+      g.addColorStop(0, theme.wallA);
+      g.addColorStop(1, theme.wallB);
+      w.fillStyle = g;
+      w.fillRect(0, 0, 4, 128);
+      wallTex.needsUpdate = true;
+    }
+
+    // ---- room (built once, re-laid out when the floor grows) ----
+    var roomMat = {
+      floor: new THREE.MeshLambertMaterial({ map: floorTex }),
+      wall: new THREE.MeshLambertMaterial({ map: wallTex }),
+      wood: new THREE.MeshLambertMaterial({ color: 0xc89a6b }),
+      woodDark: new THREE.MeshLambertMaterial({ color: 0xa6794f }),
+      loftTop: new THREE.MeshLambertMaterial({ color: 0xcfd9ee }),
+      paper: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      ink: new THREE.MeshBasicMaterial({ color: 0x2a2f45 }),
+      glass: new THREE.MeshBasicMaterial({ color: 0xbfdcff }),
+      frame: new THREE.MeshLambertMaterial({ color: 0xf4f6fb }),
+      pot: new THREE.MeshLambertMaterial({ color: 0xc8704a }),
+      soil: new THREE.MeshLambertMaterial({ color: 0x5a3e2b }),
+      leafA: new THREE.MeshLambertMaterial({ color: 0x4f9f6a }),
+      leafB: new THREE.MeshLambertMaterial({ color: 0x3f8f5c }),
+      sign: new THREE.MeshBasicMaterial({ transparent: true })
+    };
+    function box(mat, parent) { var m = new THREE.Mesh(G.box, mat); (parent || scene).add(m); return m; }
+
+    var room = {};
+    room.floor = box(roomMat.floor);
+    room.backWall = box(roomMat.wall);
+    room.leftWall = box(roomMat.wall);
+    room.backTrim = box(roomMat.woodDark);
+    room.leftTrim = box(roomMat.woodDark);
+    room.loft = box(roomMat.woodDark);
+    room.loftTop = box(roomMat.loftTop);
+    room.rail = box(roomMat.wood);
+    room.posts = [];
+    for (var pi = 0; pi < 24; pi++) room.posts.push(box(roomMat.wood));
+    room.steps = [box(roomMat.wood), box(roomMat.wood), box(roomMat.wood)];
+    room.sign = new THREE.Mesh(G.plane, roomMat.sign);
+    scene.add(room.sign);
+
+    // window (back wall)
+    room.window = new THREE.Group();
+    (function () {
+      var w = room.window;
+      var frame = box(roomMat.frame, w); frame.scale.set(1.8, 1.4, 0.08);
+      var glass = new THREE.Mesh(G.plane, roomMat.glass); glass.scale.set(1.6, 1.2, 1); glass.position.z = 0.05; w.add(glass);
+      var mv = box(roomMat.frame, w); mv.scale.set(0.07, 1.2, 0.04); mv.position.z = 0.07;
+      var mh = box(roomMat.frame, w); mh.scale.set(1.6, 0.07, 0.04); mh.position.z = 0.07;
+      var sill = box(roomMat.wood, w); sill.scale.set(2.0, 0.08, 0.22); sill.position.set(0, -0.74, 0.09);
+      scene.add(w);
+    })();
+
+    // bookshelf (back wall, right of the loft)
+    room.shelf = new THREE.Group();
+    (function () {
+      var s = room.shelf;
+      var W = 1.4, H = 2.05, Dd = 0.42;
+      var l = box(roomMat.woodDark, s); l.scale.set(0.08, H, Dd); l.position.set(-W / 2, H / 2, 0);
+      var r = box(roomMat.woodDark, s); r.scale.set(0.08, H, Dd); r.position.set(W / 2, H / 2, 0);
+      var back = box(roomMat.wood, s); back.scale.set(W, H, 0.03); back.position.set(0, H / 2, -Dd / 2 + 0.015);
+      var levels = [0.06, 0.72, 1.38, 2.02];
+      levels.forEach(function (y) { var b = box(roomMat.woodDark, s); b.scale.set(W + 0.08, 0.06, Dd); b.position.set(0, y, 0); });
+      var colors = [0xe2683a, 0x6c7ee8, 0x2fb3a1, 0xe85c9c, 0xf0b73a, 0x8a63d2];
+      var bookMats = colors.map(function (c) { return new THREE.MeshLambertMaterial({ color: c }); });
+      for (var lv = 0; lv < 3; lv++) {
+        var x = -W / 2 + 0.12;
+        var n = 6 - lv;
+        for (var i = 0; i < n; i++) {
+          var bw = 0.1 + ((i * 7 + lv * 3) % 3) * 0.025;
+          var bh = 0.38 + ((i * 5 + lv) % 4) * 0.05;
+          var book = box(bookMats[(i + lv * 2) % bookMats.length], s);
+          book.scale.set(bw, bh, 0.3);
+          book.position.set(x + bw / 2, levels[lv] + 0.03 + bh / 2, 0.02);
+          if (lv === 1 && i === n - 1) { book.rotation.z = -0.32; book.position.x += 0.08; book.position.y -= 0.02; }
+          x += bw + 0.025;
+        }
+      }
+      scene.add(s);
+    })();
+
+    // clock (left wall)
+    room.clock = new THREE.Group();
+    var clockHour, clockMin;
+    (function () {
+      var c = room.clock;
+      var face = new THREE.Mesh(G.cyl, roomMat.paper); face.scale.set(0.84, 0.06, 0.84); face.rotation.x = PI / 2; c.add(face);
+      var rim = new THREE.Mesh(G.torus, roomMat.woodDark); c.add(rim);
+      clockHour = new THREE.Mesh(G.handBar, roomMat.ink); clockHour.scale.set(0.05, 0.22, 0.02); clockHour.position.z = 0.05; c.add(clockHour);
+      clockMin = new THREE.Mesh(G.handBar, roomMat.ink); clockMin.scale.set(0.035, 0.33, 0.02); clockMin.position.z = 0.06; c.add(clockMin);
+      var dot = new THREE.Mesh(G.cyl, roomMat.ink); dot.scale.set(0.06, 0.04, 0.06); dot.rotation.x = PI / 2; dot.position.z = 0.07; c.add(dot);
+      c.rotation.y = PI / 2;
+      scene.add(c);
+    })();
+
+    // potted plant (back-left corner), leaves sway
+    room.plant = new THREE.Group();
+    var leaves = [];
+    (function () {
+      var p = room.plant;
+      var pot = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.19, 0.42, 12), roomMat.pot); pot.position.y = 0.21; p.add(pot);
+      var soil = new THREE.Mesh(G.cyl, roomMat.soil); soil.scale.set(0.48, 0.03, 0.48); soil.position.y = 0.41; p.add(soil);
+      var defs = [[0, 0.05], [1.2, 0.5], [2.4, 0.45], [3.6, 0.5], [4.8, 0.45], [0.6, 0.25], [3.0, 0.28]];
+      defs.forEach(function (d, i) {
+        var pivot = new THREE.Group();
+        pivot.position.y = 0.42;
+        pivot.rotation.y = d[0];
+        var tilt = new THREE.Group();
+        tilt.rotation.x = d[1];
+        var leaf = new THREE.Mesh(G.leaf, i % 2 ? roomMat.leafB : roomMat.leafA);
+        leaf.scale.setScalar(i < 5 ? 1 : 0.8);
+        tilt.add(leaf);
+        pivot.add(tilt);
+        p.add(pivot);
+        leaves.push({ tilt: tilt, base: d[1], phase: i * 1.3 });
+      });
+      scene.add(p);
+    })();
+
+    var roomDims = { W: 0, D: 0, LW: 0 };
+    function layoutRoom(W, D, LW) {
+      if (roomDims.W === W && roomDims.D === D && roomDims.LW === LW) return false;
+      roomDims.W = W; roomDims.D = D; roomDims.LW = LW;
+      var zB = -D / 2;
+      room.floor.scale.set(W + 0.4, 0.2, D + 0.2); room.floor.position.set(0, -0.1, 0.1);
+      floorTex.repeat.set(W / 2.4, D / 2.4);
+      room.backWall.scale.set(W + 0.4, WALL_H + 0.2, 0.2); room.backWall.position.set(0.0, WALL_H / 2 - 0.1, zB - 0.1);
+      room.leftWall.scale.set(0.2, WALL_H + 0.2, D + 0.2); room.leftWall.position.set(-W / 2 - 0.1, WALL_H / 2 - 0.1, 0);
+      room.backTrim.scale.set(W, 0.18, 0.06); room.backTrim.position.set(0, 0.09, zB + 0.03);
+      room.leftTrim.scale.set(0.06, 0.18, D); room.leftTrim.position.set(-W / 2 + 0.03, 0.09, 0);
+      room.loft.scale.set(LW, LOFT_H - 0.06, LD); room.loft.position.set(0, (LOFT_H - 0.06) / 2, zB + LD / 2);
+      room.loftTop.scale.set(LW + 0.08, 0.06, LD + 0.04); room.loftTop.position.set(0, LOFT_H - 0.03, zB + LD / 2 + 0.02);
+      var railZ = zB + LD - 0.05;
+      room.rail.scale.set(LW, 0.06, 0.07); room.rail.position.set(0, LOFT_H + 0.4, railZ);
+      var nPosts = Math.min(room.posts.length, Math.max(2, Math.round(LW / 0.7) + 1));
+      room.posts.forEach(function (p, i) {
+        p.visible = i < nPosts;
+        if (!p.visible) return;
+        p.scale.set(0.06, 0.4, 0.06);
+        p.position.set(-LW / 2 + 0.05 + (LW - 0.1) * i / (nPosts - 1), LOFT_H + 0.2, railZ);
+      });
+      room.steps.forEach(function (s, i) {
+        var h = LOFT_H * (3 - i) / 4;
+        s.scale.set(0.5, h, 1.0);
+        s.position.set(LW / 2 + 0.25 + i * 0.5, h / 2, zB + LD - 0.5);
+      });
+      room.sign.scale.set(1.1, 0.38, 1);
+      room.sign.position.set(-LW / 4, LOFT_H / 2, zB + LD + 0.006);
+      var leftSpaceCX = (-W / 2 + -LW / 2) / 2;
+      var rightSpaceCX = (W / 2 + LW / 2 + 1.6) / 2;
+      room.window.position.set(leftSpaceCX, 2.35, zB + 0.02);
+      room.shelf.position.set(rightSpaceCX, 0, zB + 0.24);
+      room.clock.position.set(-W / 2 + 0.03, 2.7, zB + Math.min(D * 0.45, LD + 2.5));
+      room.plant.position.set(-W / 2 + 0.5, 0, zB + 0.5);
+      return true;
+    }
+
+    function applyRoomTheme() {
+      paintRoomTextures();
+      roomMat.wood.color.set(theme.wood);
+      roomMat.woodDark.color.set(theme.woodDark);
+      roomMat.loftTop.color.set(theme.floorB);
+      roomMat.paper.color.set(theme.dark ? '#d9dcea' : '#ffffff');
+      roomMat.ink.color.set('#2a2f45');
+      roomMat.glass.color.set(theme.glass);
+      roomMat.frame.color.set(theme.dark ? '#3a4266' : '#f4f6fb');
+      roomMat.sign.map = textTexture('sign', 256, 88, function (ctx, w, h) {
+        ctx.fillStyle = theme.dark ? theme.paper : theme.ink;
+        roundRect(ctx, 4, 4, w - 8, h - 8, 18);
+        ctx.fill();
+        ctx.fillStyle = '#f0b73a';
+        ctx.font = '800 50px "Baloo 2", "Nunito", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★ Sếp', w / 2, h / 2 + 3);
+      });
+      roomMat.sign.needsUpdate = true;
+      var bg = new THREE.Color(theme.bg);
+      scene.background = bg;
+      scene.fog.color.copy(bg);
+      hemi.groundColor.set(theme.dark ? '#2a2f48' : '#9aa3c4');
+      hemi.intensity = theme.dark ? 0.75 : 0.85;
+      sun.intensity = theme.dark ? 0.5 : 0.6;
+    }
+
+    // ---- desks ----
+    var units = {};      // id -> unit
+    var unitList = [];   // iteration order for the render loop
+
+    function signature(it) {
+      return [it.canon, it.gender || 'm', it.hairStyle || 'cap', it.hair || '', it.shirt || '', themeStamp].join('|');
+    }
+
+    function buildUnit(it) {
+      var rc = theme.role[it.canon] || theme.role.Dev;
+      var shirt = it.shirt || rc.main;
+      var shirtDark = it.shirt ? shade(it.shirt, 0.78) : rc.dark;
+      var hair = it.hair || rc.dark;
+      var hairDark = it.hair ? shade(it.hair, 0.7) : shade(rc.dark, 0.75);
+
+      var fadeMats = [];
+      function L(color) { var m = new THREE.MeshLambertMaterial({ color: color }); fadeMats.push({ m: m, base: 1 }); return m; }
+      function B(opts, base) { var m = new THREE.MeshBasicMaterial(opts); fadeMats.push({ m: m, base: base == null ? 1 : base }); return m; }
+
+      var m = {
+        wood: L(theme.wood), woodDark: L(theme.woodDark), skin: L(theme.skin), headSkin: L(theme.skin),
+        shirt: L(shirt), shirtDark: L(shirtDark), hair: L(hair), hairDark: L(hairDark),
+        pants: L('#3d4463'), shoe: L('#2a2f45'), ink: L('#2a2f45'), cheek: L('#ffb199'),
+        mouth: L('#b5673f'), laptop: L('#8a90ad'), lid: L('#454a66'),
+        screen: B({ color: theme.working }),
+        shadow: B({ color: 0x101320, transparent: true, opacity: 0.14, depthWrite: false }, 0.14),
+        shine: B({ color: 0xffffff, transparent: true, opacity: 0.45 }, 0.45),
+        plate: B({ map: plateTexture(it.canon.toUpperCase()), transparent: true })
+      };
+      function mesh(geo, mat, parent) { var x = new THREE.Mesh(geo, mat); parent.add(x); return x; }
+
+      var root = new THREE.Group();
+
+      // blob shadow under desk + chair
+      var sh = mesh(G.disc, m.shadow, root); sh.rotation.x = -PI / 2; sh.scale.set(2.0, 1.5, 1); sh.position.set(0, 0.012, 0.3);
+
+      // desk
+      var top = mesh(G.box, m.wood, root); top.scale.set(1.5, 0.07, 0.8); top.position.set(0, DESK_Y - 0.035, 0.55);
+      var sideL = mesh(G.box, m.woodDark, root); sideL.scale.set(0.07, DESK_Y - 0.07, 0.7); sideL.position.set(-0.68, (DESK_Y - 0.07) / 2, 0.55);
+      var sideR = mesh(G.box, m.woodDark, root); sideR.scale.set(0.07, DESK_Y - 0.07, 0.7); sideR.position.set(0.68, (DESK_Y - 0.07) / 2, 0.55);
+
+      // chair
+      var seat = mesh(G.box, m.woodDark, root); seat.scale.set(0.58, 0.08, 0.5); seat.position.set(0, 0.44, -0.06);
+      var back = mesh(G.box, m.woodDark, root); back.scale.set(0.58, 0.62, 0.08); back.position.set(0, 0.8, -0.33);
+      var stem = mesh(G.cyl, m.ink, root); stem.scale.set(0.07, 0.4, 0.07); stem.position.set(0, 0.2, -0.06);
+      var foot = mesh(G.cyl, m.ink, root); foot.scale.set(0.5, 0.04, 0.5); foot.position.set(0, 0.02, -0.06);
+
+      // laptop: keyboard toward the character, lid facing them; a glowing logo on the back
+      var base = mesh(G.box, m.laptop, root); base.scale.set(0.46, 0.03, 0.3); base.position.set(0, DESK_Y + 0.015, 0.42);
+      var lidPivot = new THREE.Group(); lidPivot.position.set(0, DESK_Y + 0.03, 0.57); lidPivot.rotation.x = 0.22; root.add(lidPivot);
+      var lid = mesh(G.box, m.lid, lidPivot); lid.scale.set(0.46, 0.27, 0.02); lid.position.set(0, 0.135, 0);
+      var screen = mesh(G.plane, m.screen, lidPivot); screen.scale.set(0.4, 0.22, 1); screen.position.set(0, 0.14, -0.012); screen.rotation.y = PI;
+      var logo = mesh(G.disc, m.screen, lidPivot); logo.scale.set(0.09, 0.09, 1); logo.position.set(0, 0.14, 0.012);
+
+      // role plate standing on the desk's front edge
+      var plate = mesh(G.plane, m.plate, root); plate.scale.set(0.5, 0.17, 1); plate.position.set(0, DESK_Y + 0.1, 0.9); plate.rotation.x = -0.3;
+      var plateBack = mesh(G.box, m.ink, root); plateBack.scale.set(0.5, 0.17, 0.02); plateBack.position.set(0, DESK_Y + 0.1, 0.885); plateBack.rotation.x = -0.3;
+
+      // ---- chibi ----
+      var body = new THREE.Group(); body.position.y = SIT_HIP; root.add(body);
+      var legL = new THREE.Group(); legL.position.set(-0.11, 0, 0.02); body.add(legL);
+      var legR = new THREE.Group(); legR.position.set(0.11, 0, 0.02); body.add(legR);
+      [legL, legR].forEach(function (lg) {
+        mesh(G.leg, m.pants, lg);
+        var shoe = mesh(G.shoe, m.shoe, lg); shoe.position.set(0, -0.52, 0.04); shoe.scale.set(1, 0.7, 1.35);
+      });
+      var torso = mesh(G.torso, m.shirt, body); torso.position.y = 0.24;
+      var collar = mesh(G.collar, m.shirtDark, body); collar.position.y = 0.48;
+      var armL = new THREE.Group(); armL.position.set(-0.28, 0.42, 0); body.add(armL);
+      var armR = new THREE.Group(); armR.position.set(0.28, 0.42, 0); body.add(armR);
+      [armL, armR].forEach(function (a) {
+        mesh(G.arm, m.shirt, a);
+        var hd = mesh(G.hand, m.skin, a); hd.position.y = -0.37;
+      });
+
+      var headGrp = new THREE.Group(); headGrp.position.y = 0.5; body.add(headGrp);
+      var face = new THREE.Group(); face.position.y = 0.32; headGrp.add(face);
+      var head = mesh(G.head, m.headSkin, face); head.scale.set(1.06, 0.96, 1);
+      var eyeL = mesh(G.eye, m.ink, face); eyeL.position.set(-0.12, -0.01, 0.305);
+      var eyeR = mesh(G.eye, m.ink, face); eyeR.position.set(0.12, -0.01, 0.305);
+      var cheekL = mesh(G.cheek, m.cheek, face); cheekL.position.set(-0.21, -0.1, 0.25); cheekL.scale.set(1, 0.6, 0.45);
+      var cheekR = mesh(G.cheek, m.cheek, face); cheekR.position.set(0.21, -0.1, 0.25); cheekR.scale.set(1, 0.6, 0.45);
+      var mouth = mesh(G.mouth, m.mouth, face); mouth.position.set(0, -0.12, 0.3);
+      // rage: one heavy unibrow (two halves meeting low in the middle) + gritted teeth
+      var browL = mesh(G.unibrow, m.ink, face); browL.position.set(-0.085, 0.075, 0.305); browL.rotation.z = -0.42;
+      var browR = mesh(G.unibrow, m.ink, face); browR.position.set(0.085, 0.075, 0.305); browR.rotation.z = 0.42;
+      browL.visible = browR.visible = false;
+      var teeth = mesh(G.plane, FX.teeth, face); teeth.scale.set(0.22, 0.075, 1); teeth.position.set(0, -0.15, 0.322); teeth.visible = false;
+      // dizzy: X eyes
+      var xEyes = new THREE.Group(); face.add(xEyes); xEyes.visible = false;
+      [-0.12, 0.12].forEach(function (ex) {
+        var a = mesh(G.xbar, m.ink, xEyes); a.position.set(ex, -0.01, 0.31); a.rotation.z = 0.785;
+        var b = mesh(G.xbar, m.ink, xEyes); b.position.set(ex, -0.01, 0.31); b.rotation.z = -0.785;
+      });
+      // flames + steam over the head while raging (hidden otherwise)
+      var flames = new THREE.Group(); flames.position.y = 0.3; flames.visible = false; face.add(flames);
+      var flameMeshes = [];
+      [[0, 0, 1.25, 1], [-0.14, 0.05, 0.9, 0], [0.14, 0.03, 0.95, 0], [0.02, -0.12, 0.8, 0], [-0.06, 0.1, 0.7, 1]].forEach(function (d, i) {
+        var f = mesh(G.flame, d[3] ? FX.flameInner : FX.flameOuter, flames);
+        f.position.set(d[0], 0, d[1]);
+        f.rotation.z = -d[0] * 1.4;
+        flameMeshes.push({ m: f, h: d[2], ph: i * 1.7 });
+      });
+      var puffs = [];
+      for (var pf = 0; pf < 2; pf++) {
+        var puff = mesh(G.puff, FX.steam, flames);
+        puff.position.set(pf ? 0.3 : -0.3, 0, 0);
+        puffs.push(puff);
+      }
+      // dizzy stars circling the head
+      var stars = new THREE.Group(); stars.position.y = 0.42; stars.visible = false; face.add(stars);
+      for (var st = 0; st < 3; st++) {
+        var star = new THREE.Sprite(FX.star);
+        star.scale.set(0.16, 0.16, 1);
+        var ang = st * PI * 2 / 3;
+        star.position.set(Math.cos(ang) * 0.42, 0, Math.sin(ang) * 0.42);
+        stars.add(star);
+      }
+
+      // hair
+      var hairTop = 0.12;
+      var style = HAIR_STYLES.indexOf(it.hairStyle) >= 0 ? it.hairStyle : 'cap';
+      if (style === 'cap') {
+        var cap = mesh(G.cap, m.hair, face); cap.position.y = 0.02; cap.rotation.x = -0.38;
+      } else if (style === 'swept') {
+        var cap2 = mesh(G.cap, m.hair, face); cap2.position.y = 0.03; cap2.rotation.x = -0.42;
+        var fr = mesh(G.fringe, m.hair, face); fr.position.set(-0.1, 0.17, 0.27); fr.rotation.set(0.5, 0, 1.15); fr.scale.set(1, 1, 0.45);
+        var fr2 = mesh(G.fringe, m.hair, face); fr2.position.set(0.06, 0.24, 0.25); fr2.rotation.set(0.6, 0, 1.3); fr2.scale.set(0.8, 0.9, 0.45);
+      } else if (style === 'undercut') {
+        var cap3 = mesh(G.capShort, m.hair, face); cap3.position.y = 0.06; cap3.rotation.x = -0.15;
+        var ring = mesh(G.ring, m.hairDark, face); ring.position.y = 0.2; ring.rotation.x = PI / 2 - 0.15;
+      } else if (style === 'bald') {
+        var shine = mesh(G.shine, m.shine, face); shine.position.set(-0.08, 0.29, 0.13); shine.scale.set(1, 0.4, 0.75); shine.rotation.x = -0.5;
+      } else if (style === 'hkt') {
+        // tall boy-band spikes: a short base and a crown of cones standing up and out
+        var cap4 = mesh(G.capHkt, m.hair, face); cap4.position.y = 0.04; cap4.rotation.x = -0.2;
+        var up = new THREE.Vector3(0, 1, 0);
+        var spikes = [[0, 0, 1.35]];
+        for (var s = 0; s < 6; s++) spikes.push([0.55, s * PI / 3 + PI / 6, s % 2 ? 1.0 : 1.15]);
+        for (var s2 = 0; s2 < 5; s2++) spikes.push([0.95, s2 * 0.75 - 1.5 + PI, 0.75]);
+        spikes.forEach(function (sp, k) {
+          var a = sp[0], b = sp[1];
+          var p = new THREE.Vector3(Math.sin(a) * Math.sin(b), Math.cos(a), Math.sin(a) * Math.cos(b)).multiplyScalar(0.3);
+          var dir = p.clone().normalize().add(new THREE.Vector3(0, 0.9, 0)).normalize();
+          var cone = mesh(G.spike, k % 3 === 2 ? m.hairDark : m.hair, face);
+          cone.position.copy(p).add(new THREE.Vector3(0, 0.04, 0));
+          cone.quaternion.setFromUnitVectors(up, dir);
+          cone.scale.set(1, sp[2], 1);
+        });
+        hairTop = 0.62;
+      } else if (style === 'buzz') {
+        // đầu đinh: a thin flat-top shell close to the scalp
+        var bz = mesh(G.capBuzz, m.hair, face); bz.position.y = 0.0; bz.rotation.x = -0.2; bz.scale.set(1.0, 0.92, 1.0);
+        hairTop = 0.04;
+      } else if (style === 'mohawk') {
+        // one strip of spikes front-to-back, shaved sides
+        var mb = mesh(G.capBuzz, m.hairDark, face); mb.position.y = 0.0; mb.rotation.x = -0.2; mb.scale.set(0.3, 1.06, 1.02);
+        var mUp = new THREE.Vector3(0, 1, 0);
+        for (var mk = 0; mk < 6; mk++) {
+          var ma = 0.85 - mk * 0.4;   // +z (front) → back
+          var mp = new THREE.Vector3(0, Math.cos(ma), Math.sin(ma)).multiplyScalar(0.3);
+          var md = mp.clone().normalize().add(new THREE.Vector3(0, 0.6, 0)).normalize();
+          var mc = mesh(G.spike, m.hair, face);
+          mc.position.copy(mp).add(new THREE.Vector3(0, 0.03, 0));
+          mc.quaternion.setFromUnitVectors(mUp, md);
+          mc.scale.set(0.7, mk === 1 || mk === 2 ? 1.15 : 0.9, 0.7);
+        }
+        hairTop = 0.45;
+      } else if (style === 'topknot') {
+        // búi samurai: slicked back + a bun with a tie band
+        var tk = mesh(G.cap, m.hair, face); tk.position.y = 0.02; tk.rotation.x = -0.3; tk.scale.setScalar(0.98);
+        var bun = mesh(G.bun, m.hair, face); bun.position.set(0, 0.42, -0.06);
+        var tie = mesh(G.tie, m.ink, face); tie.position.set(0, 0.31, -0.05); tie.rotation.x = PI / 2;
+        hairTop = 0.32;
+      } else if (style === 'afro') {
+        // big round fluffy volume: a large dome plus lumps on its surface
+        var af = mesh(G.afro, m.hair, face); af.position.set(0, 0.08, -0.06); af.rotation.x = -0.62;
+        [[0.45, 0], [0.45, 1.05], [0.45, 2.1], [0.45, 3.15], [0.45, 4.2], [0.45, 5.25],
+         [1.25, PI * 0.6], [1.25, PI], [1.25, PI * 1.4]].forEach(function (d) {
+          var pb = mesh(G.afroPuff, m.hair, af);
+          pb.position.set(Math.sin(d[0]) * Math.sin(d[1]), Math.cos(d[0]), Math.sin(d[0]) * Math.cos(d[1])).multiplyScalar(0.43);
+        });
+        hairTop = 0.38;
+      } else if (style === 'curly') {
+        // xoăn mì tôm: a cap covered with small curls (none over the face)
+        var cu = mesh(G.cap, m.hair, face); cu.position.y = 0.01; cu.rotation.x = -0.38; cu.scale.setScalar(0.97);
+        [[0.15, 4], [0.65, 7], [1.1, 8]].forEach(function (ring, ri) {
+          for (var ci = 0; ci < ring[1]; ci++) {
+            var cb = ci / ring[1] * PI * 2 + ri * 0.4;
+            var front = Math.cos(cb) > 0.45 && ring[0] > 1;
+            if (front) continue;
+            var cm = mesh(G.curl, ci % 2 ? m.hairDark : m.hair, face);
+            cm.position.set(Math.sin(ring[0]) * Math.sin(cb), Math.cos(ring[0]), Math.sin(ring[0]) * Math.cos(cb)).multiplyScalar(0.36);
+            cm.position.y += 0.03;
+          }
+        });
+        hairTop = 0.1;
+      } else if (style === 'ponytail') {
+        var pc = mesh(G.cap, m.hair, face); pc.position.y = 0.02; pc.rotation.x = -0.34;
+        var tailPivot = new THREE.Group(); tailPivot.position.set(0, 0.12, -0.3); face.add(tailPivot);
+        var tl = mesh(G.tail, m.hair, tailPivot); tl.rotation.x = 0.35;
+        var tt = mesh(G.tie, m.ink, tailPivot); tt.scale.setScalar(0.7); tt.rotation.x = PI / 2 - 0.35;
+      } else if (style === 'braids') {
+        var bc = mesh(G.cap, m.hair, face); bc.position.y = 0.02; bc.rotation.x = -0.38;
+        var braids = [];
+        [-1, 1].forEach(function (sx) {
+          var bp = new THREE.Group(); bp.position.set(sx * 0.31, -0.02, -0.07); face.add(bp);
+          for (var bk = 0; bk < 5; bk++) {
+            var bd = mesh(G.bead, bk % 2 ? m.hairDark : m.hair, bp);
+            bd.position.y = -0.04 - bk * 0.09;
+            bd.scale.setScalar(1 - bk * 0.08);
+          }
+          var bt = mesh(G.tie, m.ink, bp); bt.scale.setScalar(0.45); bt.rotation.x = PI / 2; bt.position.y = -0.47;
+          braids.push(bp);
+        });
+      } else if (style === 'balding') {
+        // hói giữa: shiny crown, hair only on the sides and back
+        var bs = mesh(G.shine, m.shine, face); bs.position.set(-0.06, 0.29, 0.1); bs.scale.set(1.1, 0.4, 0.8); bs.rotation.x = -0.5;
+        var sr = mesh(G.sideRing, m.hair, face); sr.position.y = 0.05; sr.rotation.set(PI / 2, 0, PI * 0.8);
+        hairTop = 0.02;
+      } else if (style === 'bowl') {
+        // mái ngố: level bowl with a blunt fringe over the forehead
+        var bw = mesh(G.bowl, m.hair, face); bw.position.y = 0.07; bw.scale.set(1.04, 1, 1.04);
+        hairTop = 0.12;
+      }
+      if (it.gender === 'f' && !NO_SIDE_LOCKS[style]) {
+        var lockL = mesh(G.lock, m.hair, face); lockL.position.set(-0.33, -0.16, -0.04); lockL.rotation.z = -0.08;
+        var lockR = mesh(G.lock, m.hair, face); lockR.position.set(0.33, -0.16, -0.04); lockR.rotation.z = 0.08;
+        var backHair = mesh(G.box, m.hair, face); backHair.scale.set(0.56, 0.5, 0.1); backHair.position.set(0, -0.12, -0.27);
+      }
+
+      var exclMat = new THREE.SpriteMaterial({ map: exclTex, transparent: true, depthTest: false });
+      fadeMats.push({ m: exclMat, base: 1 });
+      var excl = new THREE.Sprite(exclMat);
+      excl.scale.set(0.32, 0.48, 1);
+      excl.position.set(0.42, 0.32 + 0.34 + hairTop * 0.6 + 0.2, 0);
+      excl.visible = false;
+      headGrp.add(excl);
+
+      // label element (HTML overlay)
+      var tag = document.createElement('div');
+      tag.className = 'tag';
+      var bubble = document.createElement('div'); bubble.className = 'bubble';
+      var nameTag = document.createElement('div'); nameTag.className = 'name-tag';
+      var pill = document.createElement('div'); pill.className = 'status-pill';
+      var dot = document.createElement('i');
+      var pillText = document.createElement('span');
+      pill.append(dot, pillText);
+      tag.append(bubble, nameTag, pill);
+      labelsLayer.appendChild(tag);
+
+      scene.add(root);
+
+      var crown = { hkt: 0.5, mohawk: 0.48, afro: 0.52, topknot: 0.5 }[style] || 0;
+      flames.position.y = crown || 0.28;
+      stars.position.y = crown || 0.38;
+
+      // dozing: three Z letters drifting up from the head (hidden while awake)
+      var zzz = new THREE.Group(); zzz.position.set(0.3, 0.62 + hairTop * 0.5, 0.05); zzz.visible = false; headGrp.add(zzz);
+      var zs = [];
+      for (var zi = 0; zi < 3; zi++) { var zsp = new THREE.Sprite(FX.zzz); zzz.add(zsp); zs.push(zsp); }
+
+      var screenBase = new THREE.Color(theme.working);
+      var screenIdle = new THREE.Color(theme.dark ? '#3c4670' : '#8fa3d6');
+      var u = {
+        sig: '', root: root, body: body, legL: legL, legR: legR, armL: armL, armR: armR,
+        headGrp: headGrp, eyeL: eyeL, eyeR: eyeR, mouth: mouth, browL: browL, browR: browR,
+        teeth: teeth, xEyes: xEyes, flames: flames, flameMeshes: flameMeshes, puffs: puffs, stars: stars,
+        cheekMat: m.cheek, headSkin: m.headSkin, skinBase: new THREE.Color(theme.skin),
+        hlMats: [m.shirt, m.headSkin, m.hair],
+        screenMat: m.screen, screenBase: screenBase, screenIdle: screenIdle,
+        excl: excl, fadeMats: fadeMats, fade: 1,
+        anchorY: 0.32 + 0.34 + hairTop + 0.1,
+        tag: tag, bubble: bubble, nameTag: nameTag, pillText: pillText, canon: it.canon,
+        status: 'idle', outburstOn: false, faceMode: '', rage: 0,
+        fight: null, hitBy: 0, hitDX: 0, hitDZ: 0, hitAmt: 0, highlighted: false, dead: false,
+        phase: Math.random() * 10,
+        p: { stand: 0, xOff: 0, bob: 0, headX: 0, headY: 0, headZ: 0, lX: -0.9, lZ: 0, rX: -0.9, rZ: 0, rotY: 0 },
+        lx: -1, ly: -1, lz: -1, shown: null,
+        // hair that swings
+        tail: tailPivot || null, braids: braids || null,
+        // dozing / startle
+        zzz: zzz, zs: zs, idleT: 0, dozeAfter: 20 + Math.random() * 20, dozing: false, startleAt: -9,
+        // paper ball reaction, boss-patrol fake typing, clapping
+        annoyedUntil: -1, annoyedFace: 0, rubUntil: -1, throwAt: -9,
+        fakeUntil: -1, clapUntil: -1, screenDirty: false,
+        baseText: '', baseCls: 'bubble', overText: ''
+      };
+      body.userData.unit = u;
+      setFace(u, 'normal');
+      return u;
+    }
+
+    function disposeUnit(u) {
+      u.dead = true;
+      cancelFightsFor(u);
+      if (hovered === u) hovered = null;
+      if (menuUnit === u) closeMenu();
+      if (pickAttacker === u) endPick();
+      scene.remove(u.root);
+      u.fadeMats.forEach(function (f) { f.m.dispose(); });
+      if (u.tag.parentNode) u.tag.parentNode.removeChild(u.tag);
+    }
+
+    // face modes: 'normal' smile, 'rage' (unibrow, squint, gritted teeth, red cheeks), 'dizzy' (X eyes, frown),
+    // 'sleep' (closed-eye lines)
+    function setFace(u, mode) {
+      if (u.faceMode === mode) return;
+      u.faceMode = mode;
+      var rage = mode === 'rage', dizzy = mode === 'dizzy', sleep = mode === 'sleep';
+      u.browL.visible = u.browR.visible = rage;
+      u.teeth.visible = rage;
+      u.mouth.visible = !rage;
+      u.xEyes.visible = dizzy;
+      u.eyeL.visible = u.eyeR.visible = !dizzy;
+      var ey = rage ? 0.35 : (sleep ? 0.12 : 1.15);
+      u.eyeL.scale.set(sleep ? 1.4 : 1.05, ey, 0.5); u.eyeR.scale.set(sleep ? 1.4 : 1.05, ey, 0.5);
+      u.eyeL.position.y = u.eyeR.position.y = rage ? -0.03 : (sleep ? -0.03 : -0.01);
+      u.mouth.rotation.z = dizzy ? 0 : PI;          // arc up = frown, flipped = smile
+      u.mouth.position.y = dizzy ? -0.16 : -0.11;
+      u.cheekMat.color.set(rage || dizzy ? '#ff5c4d' : '#ffb199');
+      u.stars.visible = dizzy;
+    }
+
+    function setHighlight(u, on) {
+      if (!u || u.highlighted === on) return;
+      u.highlighted = on;
+      u.hlMats.forEach(function (mt) { mt.emissive.setHex(on ? 0x664422 : 0x000000); });
+      u.tag.classList.toggle('hl', on);
+    }
+
+    function setFade(u, f) {
+      if (u.fade === f) return;
+      u.fade = f;
+      u.fadeMats.forEach(function (x) {
+        var wantT = x.base < 1 || f < 1;
+        if (x.m.transparent !== wantT) { x.m.transparent = wantT; x.m.needsUpdate = true; }
+        x.m.opacity = x.base * f;
+      });
+    }
+
+    function restoreScreen(u) {
+      u.screenDirty = false;
+      if (u.status !== 'working') u.screenMat.color.copy(u.status === 'idle' ? u.screenIdle : u.screenBase).multiplyScalar(u.status === 'idle' ? 1 : 0.8);
+    }
+
+    // a short-lived bubble ("?!", "👏") wins over the desk label until cleared
+    function applyBubble(u) {
+      var text = u.overText || u.baseText;
+      var bcls = u.overText ? 'bubble' : u.baseCls;
+      if (u.bubble.textContent !== text || u.bubble.className !== bcls) {
+        u.bubble.className = bcls;
+        u.bubble.textContent = text;
+        if (!u.overText && bcls !== 'bubble') { u.bubble.style.animation = 'none'; void u.bubble.offsetWidth; u.bubble.style.animation = ''; }
+      }
+      u.bubble.title = text;
+    }
+    function setOverText(u, text) {
+      if (u.overText === text) return;
+      u.overText = text;
+      applyBubble(u);
+    }
+
+    function updateUnit(u, it) {
+      var st = it.status || 'idle';
+      if (st !== u.status) wake(u);
+      u.status = st;
+      u.outburstOn = !!it.outburst;
+      setFade(u, it.stale ? 0.4 : (it.placeholder ? 0.75 : 1));
+      restoreScreen(u);
+
+      var cls = 'tag ' + statusClass(u.status) + (it.stale ? ' stale' : '') + (it.placeholder ? ' placeholder' : '');
+      if (u.tag.className !== cls) u.tag.className = cls;
+      u.baseText = it.outburst || it.label || '';
+      u.baseCls = 'bubble' + (it.outburst ? ' outburst' : '');
+      applyBubble(u);
+      var nm = it.name || '';
+      if (u.nameTag.textContent !== nm) u.nameTag.textContent = nm;
+      var pt = it.placeholder ? 'no work yet' : (it.stale ? 'stale' : (it.status || 'idle'));
+      if (u.pillText.textContent !== pt) u.pillText.textContent = pt;
+    }
+
+    // ---- layout ----
+    function gridCols(n) { return n <= 0 ? 0 : Math.ceil(Math.sqrt(n)); }
+
+    function placeZone(list, cx, zStart, baseY) {
+      var cols = gridCols(list.length);
+      list.forEach(function (u, i) {
+        var c = i % cols, r = Math.floor(i / cols);
+        u.root.position.set(cx + (c - (cols - 1) / 2) * CW, baseY, zStart + r * CD);
+      });
+    }
+
+    function layout(groups) {
+      var nDev = groups.Dev.length, nBa = groups.BA.length, nQc = groups.QC.length, nPm = groups.PM.length;
+      var devW = gridCols(nDev) * CW, baW = gridCols(nBa) * CW, qcW = gridCols(nQc) * CW;
+      var rows = Math.max(1,
+        nDev ? Math.ceil(nDev / gridCols(nDev)) : 0,
+        nBa ? Math.ceil(nBa / gridCols(nBa)) : 0,
+        nQc ? Math.ceil(nQc / gridCols(nQc)) : 0);
+      var M = 0.9, GAP = 0.8;
+      var LW = Math.max(4.2, nPm * CW + 1.0);
+      var mid = baW ? baW / 2 + GAP : 0.5;
+      var half = Math.max(devW, qcW, CW) + mid + M;
+      var W = Math.max(10, 2 * half, LW + 7.2);
+      var D = LD + 0.9 + (rows - 1) * CD + 0.95 + 1.0;
+      W = Math.round(W * 10) / 10; D = Math.round(D * 10) / 10;
+      var zB = -D / 2;
+
+      var changed = layoutRoom(W, D, LW);
+
+      var leftL = -W / 2 + M, leftR = -mid;
+      var rightL = mid, rightR = W / 2 - M;
+      var zMain = zB + LD + 0.9;
+      placeZone(groups.Dev, (leftL + leftR) / 2, zMain, 0);
+      placeZone(groups.BA, 0, zMain, 0);
+      placeZone(groups.QC, (rightL + rightR) / 2, zMain, 0);
+      groups.PM.forEach(function (u, i) {
+        u.root.position.set((i - (nPm - 1) / 2) * CW, LOFT_H, zB + 1.25);
+      });
+      return changed;
+    }
+
+    // ---- camera framing ----
+    var target = new THREE.Vector3(0, 1.1, 0);
+    var tmpV = new THREE.Vector3();
+    var tmpDir = new THREE.Vector3();
+    var sph = new THREE.Spherical();
+    var DEFAULT_PHI = 0.98, DEFAULT_THETA = 0.42;
+    var anim = null;
+    var framed = false;
+    var userMoved = false;
+    var viewW = 1, viewH = 1;
+
+    function fits(cam) {
+      var W = roomDims.W, D = roomDims.D;
+      var xs = [-W / 2 - 0.2, W / 2 + 0.2], ys = [-0.2, WALL_H + 0.4], zs = [-D / 2 - 0.2, D / 2 + 0.3];
+      for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) for (var k = 0; k < 2; k++) {
+        tmpV.set(xs[i], ys[j], zs[k]).project(cam);
+        if (tmpV.z > 1 || Math.abs(tmpV.x) > 0.95 || Math.abs(tmpV.y) > 0.93) return false;
+      }
+      return true;
+    }
+    function fitDistance(theta, phi) {
+      fitCam.aspect = camera.aspect;
+      fitCam.fov = camera.fov;
+      fitCam.updateProjectionMatrix();
+      tmpDir.set(Math.sin(phi) * Math.sin(theta), Math.cos(phi), Math.sin(phi) * Math.cos(theta));
+      var lo = 2, hi = 300;
+      for (var i = 0; i < 24; i++) {
+        var mid = (lo + hi) / 2;
+        fitCam.position.copy(target).addScaledVector(tmpDir, mid);
+        fitCam.lookAt(target);
+        fitCam.updateMatrixWorld();
+        if (fits(fitCam)) hi = mid; else lo = mid;
+      }
+      return hi;
+    }
+    function placeCamera(theta, phi, dist) {
+      camera.position.set(
+        target.x + dist * Math.sin(phi) * Math.sin(theta),
+        target.y + dist * Math.cos(phi),
+        target.z + dist * Math.sin(phi) * Math.cos(theta));
+      camera.lookAt(target);
+    }
+    function setLimits(fit) {
+      if (!controls) return;
+      controls.minDistance = fit * 0.45;
+      controls.maxDistance = fit * 1.45;
+    }
+    function reframe() {
+      if (!roomDims.W || viewW < 2) return;
+      if (!framed) {
+        framed = true;
+        var fit = fitDistance(DEFAULT_THETA, DEFAULT_PHI);
+        setLimits(fit);
+        anim = { t: 0, dur: 1.8,
+          th0: DEFAULT_THETA + 0.55, th1: DEFAULT_THETA,
+          ph0: DEFAULT_PHI - 0.35, ph1: DEFAULT_PHI,
+          d0: fit * 1.45, d1: fit };
+        placeCamera(anim.th0, anim.ph0, anim.d0);
+      } else {
+        sph.setFromVector3(tmpV.copy(camera.position).sub(target));
+        var fit2 = fitDistance(sph.theta, sph.phi);
+        setLimits(fit2);
+        anim = { t: 0, dur: 0.9, th0: sph.theta, th1: sph.theta, ph0: sph.phi, ph1: sph.phi, d0: sph.radius, d1: fit2 };
+      }
+      if (controls) controls.target.copy(target);
+      updateFog(fitDistance(DEFAULT_THETA, DEFAULT_PHI));
+    }
+    function updateFog(fit) {
+      scene.fog.near = fit * 1.6;
+      scene.fog.far = fit * 3.2;
+    }
+    function stepAnim(dt) {
+      if (!anim) return;
+      anim.t += dt;
+      var k = Math.min(1, anim.t / anim.dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      placeCamera(anim.th0 + (anim.th1 - anim.th0) * e, anim.ph0 + (anim.ph1 - anim.ph0) * e, anim.d0 + (anim.d1 - anim.d0) * e);
+      if (k >= 1) anim = null;
+    }
+
+    function resize() {
+      var w = stage.clientWidth, h = stage.clientHeight;
+      if (w < 2 || h < 2) return;
+      if (w === viewW && h === viewH) return;
+      viewW = w; viewH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      reframe();
+      stage.classList.toggle('dense', unitList.length > 9 || w < 520);
+    }
+
+    // ---- animation ----
+    function smooth01(x) { x = x < 0 ? 0 : (x > 1 ? 1 : x); return x * x * (3 - 2 * x); }
+
+    function wake(u) {
+      if (u.dozing) { u.dozing = false; u.startleAt = T; }
+      if (u.idleT) { u.idleT = 0; u.dozeAfter = 20 + Math.random() * 20; }
+    }
+
+    function animateUnit(u, T, dt) {
+      var t = T + u.phase;
+      var stand = 0, xOff = 0, bob = 0, headX = 0, headY = 0, headZ = 0, rotY = 0;
+      var lX = -0.95, lZ = 0.05, rX = -0.95, rZ = 0.05;
+      var exclOn = false;
+      var faking = u.fakeUntil > T && !u.fight;      // the boss walks by: look busy
+      var clapping = u.clapUntil > T && !u.fight;
+      var annoyed = u.annoyedUntil > T && !u.fight;  // just hit by a paper ball
+      // dozing: idle (or a placeholder) long enough with nothing else going on
+      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed && T >= (u.hitUntil || -1) + 0.7;
+      if (quiet) {
+        u.idleT += dt;
+        if (!u.dozing && u.idleT > u.dozeAfter) u.dozing = true;
+      } else if (u.dozing || u.idleT) wake(u);
+      switch (faking ? 'working' : u.status) {
+        case 'working': {
+          var s = Math.sin(t * (faking ? 27 : 16));
+          var amp = faking ? 0.42 : 0.3;
+          lX = -1.12 + s * amp; rX = -1.12 - s * amp;
+          bob = Math.abs(Math.sin(t * (faking ? 11 : 7))) * 0.035;
+          headZ = Math.sin(t * 3) * 0.03;
+          var flick = 0.7 + 0.3 * (((t * (faking ? 6 : 2.7)) | 0) % 3) / 2;
+          u.screenMat.color.copy(u.screenBase).multiplyScalar(flick);
+          if (faking) u.screenDirty = true;
+          break;
+        }
+        case 'reviewing':
+          headY = Math.sin(t * 1.6) * 0.5;
+          headZ = Math.sin(t * 0.8) * 0.05;
+          rX = -1.5 + Math.sin(t * 3.2) * 0.12; rZ = -0.2;
+          lX = -0.9;
+          break;
+        case 'blocked':
+          rX = -2.95; rZ = 0.3 + Math.sin(t * 18) * 0.2;
+          lX = -0.9;
+          bob = Math.abs(Math.sin(t * 9)) * 0.02;
+          headZ = Math.sin(t * 9) * 0.05;
+          exclOn = true;
+          break;
+        case 'done':
+          stand = 1; xOff = 0.85;
+          bob = Math.abs(Math.sin(t * 5)) * 0.08;
+          rX = 0; rZ = 2.5 + Math.sin(t * 11) * 0.45;
+          lX = 0; lZ = 0.12;
+          headZ = Math.sin(t * 5) * 0.06;
+          break;
+        default: { // idle: sits, then every few seconds stands, steps side to side, sits back
+          if (u.dozing) {   // nodding off: head droops, slow breathing, arms slack
+            headX = 0.5 + Math.sin(t * 1.3) * 0.05;
+            headZ = Math.sin(t * 0.6) * 0.07;
+            bob = (Math.sin(t * 1.3) + 1) * 0.006;
+            lX = rX = -0.72;
+            break;
+          }
+          var p = (t % 7) / 7;
+          if (p < 0.6) stand = 0;
+          else if (p < 0.68) stand = smooth01((p - 0.6) / 0.08);
+          else if (p < 0.92) { stand = 1; xOff = Math.sin((p - 0.68) / 0.24 * PI * 2) * 0.42; }
+          else stand = 1 - smooth01((p - 0.92) / 0.08);
+          if (stand > 0.5) { lX = 0; rX = 0; lZ = 0.12; rZ = 0.12; }
+          headZ = Math.sin(t * 1.85) * 0.08;
+        }
+      }
+      if (!faking && u.screenDirty) restoreScreen(u);
+      if (clapping) {   // both hands meet in front, quickly
+        lX = rX = -1.25;
+        lZ = rZ = -(0.45 + 0.4 * Math.max(0, Math.sin(t * 16)));
+        exclOn = false;
+      }
+      var sinceThrow = T - u.throwAt;
+      if (sinceThrow < 0.55 && !u.fight) {   // paper ball: wind up over the shoulder, then fling
+        var tk = sinceThrow / 0.55;
+        rX = tk < 0.45 ? -0.9 - 2.0 * (tk / 0.45) : -2.9 + 2.3 * ((tk - 0.45) / 0.55);
+        rZ = 0.1;
+        rotY = u.throwFace;
+        headY = 0;
+      }
+      if (annoyed) {   // turn toward the thrower; rub the bonked head for a moment
+        rotY = u.annoyedFace;
+        headY = 0; headX = 0;
+        if (u.rubUntil > T) { rX = -2.75; rZ = -0.55 + Math.sin(t * 22) * 0.18; }
+      }
+      // a punch fight overrides the status pose: walk there, jab, walk back
+      var f = u.fight;
+      if (f && f.phase === 'wait') f = null;   // gang punch: still seated until the staggered start
+      var walk = 0, lunge = 0;
+      if (f) {
+        lX = -0.3; rX = -0.3; lZ = 0.08; rZ = 0.08; headY = 0; headZ = 0; bob = 0; xOff = 0; exclOn = false;
+        stand = f.phase === 'sit' ? 0 : 1;
+        rotY = f.phase === 'sit' ? 0 : f.face;
+        if (f.phase === 'out' || f.phase === 'back') {
+          walk = 1;
+          var sw = Math.sin(f.wc);
+          lX = sw * 0.6; rX = -sw * 0.6;
+          bob = Math.abs(Math.cos(f.wc)) * 0.05;
+        } else if (f.phase === 'punch') {
+          var js = Math.sin(f.t * 14);
+          lX = -0.35 - 1.3 * Math.max(js, 0);
+          rX = -0.35 - 1.3 * Math.max(-js, 0);
+          lZ = rZ = -0.05;
+          lunge = Math.abs(js) * 0.09;
+          bob = Math.abs(js) * 0.02;
+        }
+      }
+      var sinceStartle = T - u.startleAt;
+      if (sinceStartle < 0.6) {   // woken with a start: a little jump and a "!"
+        bob += Math.sin(sinceStartle / 0.6 * PI) * 0.14;
+        exclOn = true;
+      }
+
+      var P = u.p;
+      P.headX += (headX - P.headX) * (1 - Math.exp(-dt * (headX > P.headX ? 1.2 : 9)));   // droop slowly, snap awake
+      var k = 1 - Math.exp(-dt * 20);
+      var ks = 1 - Math.exp(-dt * 8);
+      P.stand += (stand - P.stand) * ks;
+      P.xOff += (xOff - P.xOff) * ks;
+      P.bob += (bob - P.bob) * k;
+      P.headY += (headY - P.headY) * k;
+      P.headZ += (headZ - P.headZ) * k;
+      P.lX += (lX - P.lX) * k; P.lZ += (lZ - P.lZ) * k;
+      P.rX += (rX - P.rX) * k; P.rZ += (rZ - P.rZ) * k;
+      var dr = rotY - P.rotY;
+      dr = Math.atan2(Math.sin(dr), Math.cos(dr));
+      P.rotY += dr * (1 - Math.exp(-dt * 10));
+
+      // rage blend (outburst or attacking): red skin, flames, head shake
+      var rageT = (u.outburstOn || (f && f.phase !== 'sit' && !f.patrol)) ? 1 : 0;
+      u.rage += (rageT - u.rage) * (1 - Math.exp(-dt * 10));
+      if (Math.abs(u.rage - (u.rageApplied || 0)) > 0.004) {
+        u.rageApplied = u.rage;
+        u.headSkin.color.copy(u.skinBase).lerp(RAGE_SKIN, u.rage * 0.85);
+      }
+      var dizzy = T < (u.hitUntil || -1) + 0.7;
+      setFace(u, dizzy ? 'dizzy' : (u.rage > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')));
+      setOverText(u, annoyed ? '?!' : '');
+      if (u.dozing !== u.zzz.visible) u.zzz.visible = u.dozing;
+      if (u.dozing) {
+        for (var zk = 0; zk < 3; zk++) {
+          var zp = (t * 0.45 + zk / 3) % 1;
+          var zsc = Math.sin(zp * PI) * 0.17 + 0.01;
+          u.zs[zk].position.set(zp * 0.22, zp * 0.55, 0);
+          u.zs[zk].scale.set(zsc, zsc, 1);
+        }
+      }
+      var raging = u.rage > 0.05;
+      if (raging !== u.flames.visible) u.flames.visible = raging;
+      if (raging) {
+        for (var fi = 0; fi < u.flameMeshes.length; fi++) {
+          var fm = u.flameMeshes[fi];
+          var fl = u.rage * (0.75 + 0.35 * Math.abs(Math.sin(t * 17 + fm.ph)));
+          fm.m.scale.set(fl, fm.h * u.rage * (0.7 + 0.5 * Math.abs(Math.sin(t * 23 + fm.ph * 2))), fl);
+        }
+        for (var pj = 0; pj < u.puffs.length; pj++) {
+          var ph = (t * 0.9 + pj * 0.5) % 1;
+          u.puffs[pj].position.y = 0.05 + ph * 0.5;
+          u.puffs[pj].scale.setScalar((0.4 + ph * 1.3) * u.rage * (1 - ph * 0.6));
+        }
+      }
+      var shake = u.rage * 0.05;
+      if (dizzy) u.stars.rotation.y = t * 4;
+
+      // target recoil while being punched
+      var rec = u.hitAmt || 0;
+      if (rec > 0.0005) u.hitAmt = rec * Math.exp(-dt * 10);
+
+      var hipY = SIT_HIP + (STAND_HIP - SIT_HIP) * P.stand + P.bob;
+      if (f) {
+        var rp = u.root.position;
+        u.body.position.set(
+          f.pos.x - rp.x + Math.sin(P.rotY) * lunge,
+          f.pos.y - rp.y + hipY,
+          f.pos.z - rp.z + Math.cos(P.rotY) * lunge);
+      } else {
+        u.body.position.set(P.xOff + u.hitDX * rec, hipY, P.stand * 0.06 + u.hitDZ * rec);
+      }
+      u.body.rotation.y = P.rotY;
+      var legRot = -PI / 2 * (1 - P.stand);
+      var swing = walk ? Math.sin(f.wc) * 0.6 : 0;
+      u.legL.rotation.x = legRot + swing; u.legR.rotation.x = legRot - swing;
+      u.headGrp.rotation.x = P.headX;
+      u.headGrp.rotation.y = P.headY;
+      // swinging hair: a gentle sway, bigger while walking
+      if (u.tail || u.braids) {
+        var stride = walk ? Math.sin(f.wc) : 0;
+        var sway = Math.sin(t * 2.2) * 0.08 + stride * 0.35 - P.headZ * 0.8;
+        if (u.tail) {
+          u.tail.rotation.z = sway;
+          u.tail.rotation.x = walk ? 0.3 + Math.abs(stride) * 0.25 : P.bob * 3;
+        }
+        if (u.braids) {
+          u.braids[0].rotation.z = sway * 0.6;
+          u.braids[1].rotation.z = sway * 0.6;
+          u.braids[0].rotation.x = u.braids[1].rotation.x = walk ? 0.2 + Math.abs(stride) * 0.15 : 0;
+        }
+      }
+      u.headGrp.rotation.z = P.headZ + Math.sin(t * 45) * shake + u.hitDX * rec * 3;
+      u.headGrp.position.x = Math.sin(t * 53) * shake * 0.25;
+      u.armL.rotation.x = P.lX; u.armL.rotation.z = -P.lZ;
+      u.armR.rotation.x = P.rX; u.armR.rotation.z = P.rZ;
+      if (exclOn) {
+        u.excl.visible = true;
+        var pop = 1 + Math.sin(t * 10) * 0.12;
+        u.excl.scale.set(0.32 * pop, 0.48 * pop, 1);
+      } else if (u.excl.visible) u.excl.visible = false;
+    }
+
+    /* ---- punch fights (purely visual, never written anywhere) ---- */
+    var fights = [];
+    var POWS = ['POW!', 'BAM!', 'WHAM!', 'BONK!'];
+    var WALK_SPEED = 2.6;
+
+    function groundAt(x, z) {
+      var zB = -roomDims.D / 2, LW = roomDims.LW;
+      var zS = zB + LD - 0.5;
+      if (Math.abs(z - zS) <= 0.5) {
+        for (var i = 0; i < 3; i++) {
+          var x0 = LW / 2 + i * 0.5;
+          if (x >= x0 && x < x0 + 0.5) return LOFT_H * (3 - i) / 4;
+        }
+      }
+      if (Math.abs(x) <= LW / 2 && z >= zB && z < zB + LD - 0.05) return LOFT_H;
+      return 0;
+    }
+
+    // seat → beside own desk → aisle (or loft stairs) → aisle by the target → beside the target
+    function computePath(f) {
+      if (f.patrol) return;   // the boss's stroll uses a fixed route
+      var a = f.att.root.position, b = f.tgtPos, P = f.path, n = 0;
+      var zB = -roomDims.D / 2, LW = roomDims.LW, zS = zB + LD - 0.5;
+      var stairTop = LW / 2 - 0.35, stairBot = LW / 2 + 1.85;
+      function add(x, z) { P[n++].set(x, 0, z); }
+      add(a.x, a.z);
+      add(a.x + f.sideA, a.z + 0.05);
+      var aL = a.y > 0.5, bL = b.y > 0.5;
+      // gang punch: each attacker has its own slot on a ring around the target (sides + back)
+      var ring = f.slotX != null;
+      var ex = ring ? f.slotX : f.sideT * 0.75, ez = ring ? f.slotZ : 0.02;
+      var ax = ring ? f.slotX : f.sideT * 0.8;
+      if (aL && bL) {
+        add(a.x + f.sideA, zB + 0.35);
+        add(b.x + ax, zB + 0.35);
+      } else {
+        if (aL) { add(stairTop, zS); add(stairBot, zS); } else add(a.x + f.sideA, a.z - 0.85);
+        if (bL) { add(stairBot, zS); add(stairTop, zS); } else add(b.x + ax, b.z - (ring ? Math.max(0.85, -f.slotZ + 0.3) : 0.85));
+      }
+      add(b.x + ex, b.z + ez);
+      f.n = n;
+      if (f.idx > n - 1) f.idx = n - 1;
+    }
+
+    function startFight(att, tgt, gang) {
+      if (!att || !tgt || att === tgt || att.fight || tgt.fight || att.dead || tgt.dead) return null;
+      var a = att.root.position, b = tgt.root.position;
+      var dx = b.x - a.x;
+      var sideA = dx < -0.01 ? -1 : 1;
+      var sideT = Math.abs(dx) > 0.01 ? -sideA : sideA;
+      var path = [];
+      for (var i = 0; i < 8; i++) path.push(new THREE.Vector3());
+      var f = {
+        att: att, tgt: tgt, phase: 'stand', t: 0, idx: 0, n: 0, path: path,
+        pos: new THREE.Vector3(a.x + att.p.xOff, a.y, a.z), tgtPos: b.clone(), gy: a.y,
+        face: 0, wc: 0, sideA: sideA, sideT: sideT, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 3, powX: 0.3, powY: 0
+      };
+      if (gang) {
+        f.phase = 'wait';
+        f.delay = gang.delay;
+        f.slotX = gang.slotX; f.slotZ = gang.slotZ;
+        f.punchDur = gang.punchDur;
+        f.powX = gang.powX; f.powY = gang.powY;
+        f.powT = gang.powT;
+      }
+      att.fight = f;
+      fights.push(f);
+      return f;
+    }
+
+    // "Đánh hội đồng": everyone else (closest 8, nobody already fighting) mobs the target
+    var GANG_MAX = 8;
+    function gangCandidates(tgt) {
+      var a = [];
+      for (var i = 0; i < unitList.length; i++) {
+        var u = unitList[i];
+        if (u !== tgt && !u.dead && !u.fight) a.push(u);
+      }
+      return a;
+    }
+    function startGang(tgt) {
+      if (!tgt || tgt.dead || tgt.fight) return 0;
+      var b = tgt.root.position;
+      var list = gangCandidates(tgt).map(function (u) {
+        var p = u.root.position;
+        var dx = p.x - b.x, dz = p.z - b.z, dy = p.y - b.y;
+        return { u: u, d: dx * dx + dz * dz + dy * dy * 4, ang: Math.atan2(-dz, dx) };
+      });
+      list.sort(function (x, y) { return x.d - y.d; });
+      list = list.slice(0, GANG_MAX);
+      var n = list.length;
+      if (!n) return 0;
+      // slots on an arc from the target's right (+x) round the back (-z) to its left (-x);
+      // the desk is in front (+z), so nobody stands in it
+      var onLoft = b.y > 0.5;
+      var R = onLoft ? 0.95 : (n > 5 ? 1.1 : 0.9);
+      var a0 = n > 2 ? -0.25 : 0, a1 = n > 2 ? PI + 0.25 : PI;
+      // attackers coming from the right take the right-hand slots, so paths cross less
+      list.sort(function (x, y) {
+        var ax = x.ang < -PI / 2 ? x.ang + 2 * PI : x.ang;
+        var ay = y.ang < -PI / 2 ? y.ang + 2 * PI : y.ang;
+        return ax - ay;
+      });
+      list.forEach(function (it, k) {
+        var ang = n === 1 ? PI / 2 : a0 + (a1 - a0) * k / (n - 1);
+        startFight(it.u, tgt, {
+          delay: Math.random() * 0.4,
+          slotX: Math.cos(ang) * R,
+          slotZ: Math.min(0.15, -Math.sin(ang) * R),
+          punchDur: 2.6 + Math.random() * 0.8,
+          powX: (Math.random() - 0.5) * 0.9,
+          powY: (Math.random() - 0.3) * 0.35,
+          powT: Math.random() * 0.45
+        });
+      });
+      return n;
+    }
+
+    function removePow(f) {
+      if (f.pow && f.pow.parentNode) f.pow.parentNode.removeChild(f.pow);
+      f.pow = null;
+    }
+    function endFight(f) {
+      var i = fights.indexOf(f);
+      if (i >= 0) fights.splice(i, 1);
+      removePow(f);
+      if (f.att.fight === f) {
+        f.att.fight = null;
+        f.att.p.xOff = 0;
+      }
+    }
+    function goBack(f) {
+      removePow(f);
+      if (f.phase === 'wait') { endFight(f); return; }   // never got up
+      if (f.phase === 'out') { f.phase = 'back'; f.idx = Math.max(0, f.idx - 1); }
+      else if (f.phase === 'punch') { f.phase = 'back'; f.idx = Math.max(0, f.n - 2); }
+      else if (f.phase === 'stand') { f.phase = 'sit'; }
+      f.t = 0;
+    }
+    // a desk rebuilt / removed mid-fight: drop the fight cleanly
+    function cancelFightsFor(u) {
+      for (var i = fights.length - 1; i >= 0; i--) {
+        var f = fights[i];
+        if (f.att === u) endFight(f);
+        else if (f.tgt === u) { f.tgt = null; goBack(f); }
+      }
+    }
+
+    function walkToward(f, goal, dt) {
+      var dx = goal.x - f.pos.x, dz = goal.z - f.pos.z;
+      var d = Math.sqrt(dx * dx + dz * dz);
+      var step = (f.speed || WALK_SPEED) * dt;
+      if (d > 0.001) f.face = Math.atan2(dx, dz);
+      if (d <= step) { f.pos.x = goal.x; f.pos.z = goal.z; f.wc += d * 7; return true; }
+      f.pos.x += dx / d * step; f.pos.z += dz / d * step;
+      f.wc += step * 7;
+      return false;
+    }
+
+    function updateFights(dt) {
+      for (var i = fights.length - 1; i >= 0; i--) {
+        var f = fights[i];
+        if (f.tgt) f.tgtPos.copy(f.tgt.root.position);
+        computePath(f);
+        f.t += dt;
+        if (f.phase === 'wait') {
+          if (!f.tgt) { endFight(f); continue; }
+          if (f.t > f.delay) { f.phase = 'stand'; f.t = 0; }
+          continue;
+        }
+        if (f.phase === 'stand') {
+          f.pos.x += (f.path[0].x - f.pos.x) * Math.min(1, dt * 8);
+          f.pos.z += (f.path[0].z - f.pos.z) * Math.min(1, dt * 8);
+          if (f.t > 0.4) { f.phase = 'out'; f.idx = 1; f.t = 0; }
+        } else if (f.phase === 'out') {
+          if (walkToward(f, f.path[f.idx], dt)) {
+            if (f.idx >= f.n - 1) {
+              if (f.patrol) { f.phase = 'sit'; f.t = 0; }   // the route ends back at the seat
+              else if (f.tgt) { f.phase = 'punch'; f.t = 0; } else goBack(f);
+            } else f.idx++;
+          }
+        } else if (f.phase === 'back') {
+          if (walkToward(f, f.path[f.idx], dt)) {
+            if (f.idx <= 0) { f.phase = 'sit'; f.t = 0; } else f.idx--;
+          }
+        } else if (f.phase === 'punch') {
+          if (!f.tgt) { goBack(f); }
+          else {
+            var tg = f.tgt, tp = tg.root.position;
+            var hx = tp.x + tg.p.xOff - f.pos.x, hz = tp.z - f.pos.z;
+            var hd = Math.sqrt(hx * hx + hz * hz) || 1;
+            f.face = Math.atan2(hx, hz);
+            var js = Math.abs(Math.sin(f.t * 14));
+            tg.hitUntil = T;
+            wake(tg);
+            tg.hitDX = hx / hd; tg.hitDZ = hz / hd;
+            tg.hitAmt = Math.max(tg.hitAmt || 0, js * 0.09);
+            if (!f.pow) {
+              f.pow = document.createElement('div');
+              f.pow.className = 'pow';
+              f.pow.style.zIndex = 20000;
+              labelsLayer.appendChild(f.pow);
+              if (f.slotX == null) f.powT = 1;   // gang: keep the random head start so pops stagger
+            }
+            f.powT += dt;
+            if (f.powT > 0.45) {
+              f.powT = 0;
+              f.powI++;
+              var sp = document.createElement('span');
+              sp.textContent = POWS[f.powI % POWS.length];
+              f.pow.textContent = '';
+              f.pow.appendChild(sp);
+            }
+            if (f.t > f.punchDur) goBack(f);
+          }
+        } else if (f.phase === 'sit') {
+          f.pos.x = f.path[0].x; f.pos.z = f.path[0].z;
+          if (f.t > 0.45) { endFight(f); continue; }
+        }
+        f.gy += (groundAt(f.pos.x, f.pos.z) - f.gy) * Math.min(1, dt * 12);
+        f.pos.y = f.gy;
+      }
+    }
+
+    /* ---- boss patrol: every 60–120 s the PM strolls down the aisle and back ---- */
+    var patrolAt = 60 + Math.random() * 60;
+    var patrolFight = null;
+    var PATROL_NEAR2 = 2.4 * 2.4;
+
+    function startPatrol(pm) {
+      var a = pm.root.position;
+      var W = roomDims.W, D = roomDims.D, zB = -D / 2, LW = roomDims.LW, zS = zB + LD - 0.5;
+      var stairTop = LW / 2 - 0.35, stairBot = LW / 2 + 1.85;
+      var zBack = zB + LD + 0.05;          // aisle behind the first row of chairs
+      var zFront = D / 2 - 0.45;           // strip in front of the last row of desks
+      var xL = -W / 2 + 0.8, xR = W / 2 - 0.8;
+      var onLoft = a.y > 0.5;
+      var pts = [[a.x, a.z], [a.x + 1, a.z + 0.05]];
+      if (onLoft) pts.push([stairTop, zS], [stairBot, zS]);
+      pts.push([onLoft ? stairBot : a.x + 1, zBack], [xL, zBack], [xL, zFront], [xR, zFront], [xR, zBack]);
+      if (onLoft) pts.push([stairBot, zBack], [stairBot, zS], [stairTop, zS]);
+      else pts.push([a.x + 1, zBack]);
+      pts.push([a.x + 1, a.z + 0.05], [a.x, a.z]);
+      var f = {
+        att: pm, tgt: null, patrol: true, phase: 'stand', t: 0, idx: 0, n: pts.length,
+        path: pts.map(function (p) { return new THREE.Vector3(p[0], 0, p[1]); }),
+        pos: new THREE.Vector3(a.x + pm.p.xOff, a.y, a.z), tgtPos: a.clone(), gy: a.y,
+        face: 0, wc: 0, sideA: 1, sideT: 1, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 0, powX: 0, powY: 0, speed: 1.5
+      };
+      wake(pm);
+      pm.fight = f;
+      fights.push(f);
+      return f;
+    }
+
+    function updatePatrol() {
+      if (patrolFight && fights.indexOf(patrolFight) < 0) patrolFight = null;
+      if (!patrolFight && T > patrolAt) {
+        patrolAt = T + 60 + Math.random() * 60;
+        for (var i = 0; i < unitList.length; i++) {
+          var c = unitList[i];
+          if (c.canon === 'PM' && !c.dead && !c.fight) { if (roomDims.W) patrolFight = startPatrol(c); break; }
+        }
+      }
+      var f = patrolFight;
+      if (!f || f.phase === 'stand' || f.phase === 'sit') return;
+      // anyone idle / dozing near the boss suddenly gets very busy
+      for (var j = 0; j < unitList.length; j++) {
+        var u = unitList[j];
+        if (u === f.att || u.fight || (u.status !== 'idle' && !u.dozing)) continue;
+        var rp = u.root.position;
+        var dx = rp.x - f.pos.x, dz = rp.z - f.pos.z;
+        if (Math.abs(rp.y - f.pos.y) < 0.6 && dx * dx + dz * dz < PATROL_NEAR2) u.fakeUntil = T + 1.0;
+      }
+    }
+
+    /* ---- paper balls (pooled) ---- */
+    var balls = [];
+    var BALL_MAX = 12;
+    var ballsLive = 0;
+
+    function getBall() {
+      for (var i = 0; i < balls.length; i++) if (!balls[i].active) return balls[i];
+      if (balls.length >= BALL_MAX) return null;
+      var mat = new THREE.MeshPhongMaterial({ color: 0xf4f3ec, flatShading: true, shininess: 4, transparent: true });
+      var m = new THREE.Mesh(G.paper, mat);
+      m.visible = false;
+      scene.add(m);
+      var b = { m: m, mat: mat, active: false, state: '', t: 0, dur: 1, h: 1, life: 0,
+        s: new THREE.Vector3(), e: new THREE.Vector3(), v: new THREE.Vector3(), att: null, tgt: null };
+      balls.push(b);
+      return b;
+    }
+
+    function throwPaper(att, tgt) {
+      if (!att || !tgt || att === tgt || att.dead || tgt.dead || att.fight) return;
+      var b = getBall();
+      if (!b) return;
+      wake(att);
+      var a = att.root.position, c = tgt.root.position;
+      att.throwAt = T;
+      att.throwFace = Math.atan2(c.x - a.x, c.z - a.z);
+      b.active = true; b.state = 'wait'; b.t = 0.26; b.att = att; b.tgt = tgt;
+      ballsLive++;
+    }
+
+    function freeBall(b) {
+      b.active = false; b.state = ''; b.att = b.tgt = null;
+      b.m.visible = false;
+      b.mat.opacity = 1;
+      ballsLive--;
+    }
+
+    function ballTargetPoint(b) {
+      if (b.tgt && !b.tgt.dead) { b.e.set(0, 0.55, 0.05); b.tgt.headGrp.localToWorld(b.e); }
+    }
+
+    function bonk(b) {
+      var tg = b.tgt, at = b.att;
+      if (!tg || tg.dead) return;
+      wake(tg);
+      tg.annoyedUntil = T + 1.5;
+      tg.rubUntil = T + 0.9;
+      var tp = tg.root.position;
+      var sx = at && !at.dead ? at.root.position.x : b.s.x, sz = at && !at.dead ? at.root.position.z : b.s.z;
+      tg.annoyedFace = Math.atan2(sx - tp.x, sz - tp.z);
+      var dx = tp.x - sx, dz = tp.z - sz, d = Math.sqrt(dx * dx + dz * dz) || 1;
+      tg.hitDX = dx / d; tg.hitDZ = dz / d;
+      tg.hitAmt = Math.max(tg.hitAmt || 0, 0.06);
+    }
+
+    function updateBalls(dt) {
+      for (var i = 0; i < balls.length; i++) {
+        var b = balls[i];
+        if (!b.active) continue;
+        if (b.state === 'wait') {
+          b.t -= dt;
+          if (b.t > 0) continue;
+          if (!b.att || b.att.dead || !b.tgt || b.tgt.dead) { freeBall(b); continue; }
+          b.s.set(0, -0.37, 0.05);
+          b.att.armR.localToWorld(b.s);
+          ballTargetPoint(b);
+          var dist = b.s.distanceTo(b.e);
+          b.dur = Math.max(0.5, Math.min(1.2, dist / 7));
+          b.h = 0.5 + dist * 0.08;
+          b.t = 0;
+          b.state = 'fly';
+          b.m.visible = true;
+          b.m.position.copy(b.s);
+        } else if (b.state === 'fly') {
+          b.t += dt / b.dur;
+          ballTargetPoint(b);
+          var k = Math.min(1, b.t);
+          b.m.position.lerpVectors(b.s, b.e, k);
+          b.m.position.y += 4 * b.h * k * (1 - k);
+          b.m.rotation.x += dt * 9; b.m.rotation.z += dt * 6;
+          if (k >= 1) {
+            bonk(b);
+            b.state = 'fall';
+            b.v.set(b.e.x - b.s.x, 0, b.e.z - b.s.z).normalize().multiplyScalar(-0.9);
+            b.v.x += (Math.random() - 0.5) * 0.8; b.v.z += (Math.random() - 0.5) * 0.8;
+            b.v.y = 1.7;
+          }
+        } else if (b.state === 'fall') {
+          b.v.y -= 9.8 * dt;
+          b.m.position.addScaledVector(b.v, dt);
+          b.m.rotation.x += dt * 5;
+          var floor = groundAt(b.m.position.x, b.m.position.z) + 0.07;
+          if (b.m.position.y <= floor) {
+            b.m.position.y = floor;
+            if (b.v.y < -1.2) { b.v.y = -b.v.y * 0.35; b.v.x *= 0.6; b.v.z *= 0.6; }
+            else { b.state = 'rest'; b.life = 3.6; }
+          }
+        } else if (b.state === 'rest') {
+          b.life -= dt;
+          if (b.life < 0.6) b.mat.opacity = Math.max(0, b.life / 0.6);
+          if (b.life <= 0) freeBall(b);
+        }
+      }
+    }
+
+    /* ---- confetti (pooled quads) ---- */
+    var confetti = [];
+    var CONF_PER_BURST = 36, CONF_MAX = 72;
+    var confLive = 0;
+
+    function getConf(i) {
+      for (var k = 0; k < confetti.length; k++) if (!confetti[k].active) return confetti[k];
+      if (confetti.length >= CONF_MAX) return null;
+      var m = new THREE.Mesh(G.confetti, confettiMats[i % confettiMats.length]);
+      m.visible = false;
+      scene.add(m);
+      var c = { m: m, active: false, vx: 0, vy: 0, vz: 0, sx: 0, sy: 0, life: 0 };
+      confetti.push(c);
+      return c;
+    }
+
+    function burst(u) {
+      var p = u.root.position;
+      var x0 = p.x + u.body.position.x, y0 = p.y + 2.0, z0 = p.z + u.body.position.z;
+      for (var i = 0; i < CONF_PER_BURST; i++) {
+        var c = getConf(i);
+        if (!c) break;
+        var a = Math.random() * PI * 2, sp = 0.6 + Math.random() * 1.4;
+        c.active = true;
+        c.vx = Math.cos(a) * sp; c.vz = Math.sin(a) * sp; c.vy = 2.2 + Math.random() * 1.8;
+        c.sx = (Math.random() - 0.5) * 18; c.sy = (Math.random() - 0.5) * 18;
+        c.life = 1.7 + Math.random() * 0.5;
+        c.m.position.set(x0, y0, z0);
+        c.m.scale.setScalar(1);
+        c.m.visible = true;
+        confLive++;
+      }
+    }
+
+    function updateConfetti(dt) {
+      var drag = 1 - Math.min(0.9, dt * 1.6);
+      for (var i = 0; i < confetti.length; i++) {
+        var c = confetti[i];
+        if (!c.active) continue;
+        c.vy -= 5 * dt;
+        c.vx *= drag; c.vz *= drag;
+        c.m.position.x += c.vx * dt; c.m.position.y += c.vy * dt; c.m.position.z += c.vz * dt;
+        c.m.rotation.x += c.sx * dt; c.m.rotation.y += c.sy * dt;
+        c.life -= dt;
+        if (c.life < 0.3) c.m.scale.setScalar(Math.max(0.01, c.life / 0.3));
+        if (c.life <= 0) { c.active = false; c.m.visible = false; confLive--; }
+      }
+    }
+
+    function celebrate(id) {
+      var u = units[id];
+      if (!u || !active || u.dead) return;
+      burst(u);
+      for (var i = 0; i < unitList.length; i++) {
+        var o = unitList[i];
+        if (o !== u) { o.clapUntil = T + 2; wake(o); }
+      }
+    }
+
+    function clearEffects() {
+      for (var i = 0; i < balls.length; i++) if (balls[i].active) freeBall(balls[i]);
+      for (var j = 0; j < confetti.length; j++) { confetti[j].active = false; confetti[j].m.visible = false; }
+      confLive = 0;
+      patrolFight = null;
+      unitList.forEach(function (u) {
+        u.fakeUntil = u.clapUntil = u.annoyedUntil = u.rubUntil = -1;
+        u.throwAt = u.startleAt = -9;
+        setOverText(u, '');
+        if (u.screenDirty) restoreScreen(u);
+      });
+    }
+
+    function positionPows() {
+      for (var i = 0; i < fights.length; i++) {
+        var f = fights[i];
+        if (!f.pow || !f.tgt) continue;
+        tmpV.set(f.powX, f.tgt.anchorY - 0.35 + f.powY, 0);
+        f.tgt.headGrp.localToWorld(tmpV);
+        tmpV.project(camera);
+        var vis = tmpV.z < 1 && Math.abs(tmpV.x) <= 1 && Math.abs(tmpV.y) <= 1;
+        f.pow.hidden = !vis;
+        if (!vis) continue;
+        f.pow.style.transform = 'translate(' + ((tmpV.x * 0.5 + 0.5) * viewW).toFixed(1) + 'px,' +
+          ((-tmpV.y * 0.5 + 0.5) * viewH).toFixed(1) + 'px) translate(-50%,-100%)';
+      }
+    }
+
+    /* ---- right-click / long-press menu and target picking ---- */
+    var raycaster = new THREE.Raycaster();
+    var ndc = new THREE.Vector2();
+    var menuEl = document.getElementById('ctx-menu');
+    var punchBtn = document.getElementById('ctx-punch');
+    var gangBtn = document.getElementById('ctx-gang');
+    var paperBtn = document.getElementById('ctx-paper');
+    var pickHint = document.getElementById('pick-hint');
+    var menuUnit = null, pickAttacker = null, pickMode = 'punch', hovered = null;
+    var cvs = renderer.domElement;
+
+    function pickUnitAt(cx, cy) {
+      var r = cvs.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+      raycaster.setFromCamera(ndc, camera);
+      var objs = unitList.map(function (u) { return u.body; });
+      var hits = raycaster.intersectObjects(objs, true);
+      for (var i = 0; i < hits.length; i++) {
+        var o = hits[i].object, hiddenPart = false;
+        while (o && !(o.userData && o.userData.unit)) { if (!o.visible) hiddenPart = true; o = o.parent; }
+        if (hiddenPart) continue;   // the raycaster also hits hidden flames / stars / X eyes
+        if (o && !o.userData.unit.dead) return o.userData.unit;
+      }
+      return null;
+    }
+    function openMenu(u, cx, cy) {
+      menuUnit = u;
+      menuEl.hidden = false;
+      var r = stage.getBoundingClientRect();
+      var x = Math.min(cx - r.left, r.width - menuEl.offsetWidth - 6);
+      var y = Math.min(cy - r.top, r.height - menuEl.offsetHeight - 6);
+      menuEl.style.left = Math.max(6, x) + 'px';
+      menuEl.style.top = Math.max(6, y) + 'px';
+      punchBtn.disabled = !!u.fight;
+      punchBtn.title = u.fight ? 'Already in a fight' : 'Punch';
+      var nobody = !gangCandidates(u).length;
+      gangBtn.disabled = !!u.fight || nobody;
+      gangBtn.title = u.fight ? 'Already in a fight' : (nobody ? 'Nobody free to join' : 'Gang punch');
+      paperBtn.disabled = !!u.fight;
+      paperBtn.title = u.fight ? 'Busy fighting' : 'Throw paper';
+    }
+    function closeMenu() { if (menuEl) menuEl.hidden = true; menuUnit = null; }
+    function beginPick(u, mode) {
+      pickAttacker = u;
+      pickMode = mode || 'punch';
+      pickHint.textContent = pickMode === 'paper' ? 'Pick who to hit with paper · Esc to cancel' : 'Pick who to punch · Esc to cancel';
+      stage.classList.add('picking');
+      pickHint.hidden = false;
+    }
+    function endPick() {
+      pickAttacker = null;
+      stage.classList.remove('picking');
+      if (pickHint) pickHint.hidden = true;
+      if (hovered) { setHighlight(hovered, false); hovered = null; }
+    }
+    function setHover(u) {
+      if (u === hovered) return;
+      if (hovered) setHighlight(hovered, false);
+      hovered = u;
+      if (u) setHighlight(u, true);
+    }
+
+    punchBtn.addEventListener('click', function () {
+      var u = menuUnit;
+      closeMenu();
+      if (u && !u.fight && !u.dead) beginPick(u, 'punch');
+    });
+    paperBtn.addEventListener('click', function () {
+      var u = menuUnit;
+      closeMenu();
+      if (u && !u.fight && !u.dead) beginPick(u, 'paper');
+    });
+    gangBtn.addEventListener('click', function () {
+      var u = menuUnit;
+      closeMenu();
+      endPick();
+      if (u && !u.fight && !u.dead) startGang(u);
+    });
+    document.addEventListener('pointerdown', function (e) {
+      if (!menuEl.hidden && !menuEl.contains(e.target)) closeMenu();
+    }, true);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { closeMenu(); endPick(); }
+    });
+    cvs.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      if (pickAttacker) { endPick(); return; }
+      var u = pickUnitAt(e.clientX, e.clientY);
+      if (u) openMenu(u, e.clientX, e.clientY); else closeMenu();
+    });
+    var down = null, longTimer = 0;
+    cvs.addEventListener('pointerdown', function (e) {
+      down = { x: e.clientX, y: e.clientY, button: e.button, moved: false, long: false };
+      clearTimeout(longTimer);
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        var cx = e.clientX, cy = e.clientY, d = down;
+        longTimer = setTimeout(function () {
+          if (d.moved || down !== d) return;
+          d.long = true;
+          var u = pickUnitAt(cx, cy);
+          if (u) { endPick(); openMenu(u, cx, cy); }
+        }, 500);
+      }
+    });
+    cvs.addEventListener('pointermove', function (e) {
+      if (down && !down.moved && (Math.abs(e.clientX - down.x) > 8 || Math.abs(e.clientY - down.y) > 8)) {
+        down.moved = true;
+        clearTimeout(longTimer);
+      }
+      if (pickAttacker && e.pointerType === 'mouse' && !down) {
+        var u = pickUnitAt(e.clientX, e.clientY);
+        setHover(u && u !== pickAttacker && (pickMode === 'paper' || !u.fight) ? u : null);
+      }
+    });
+    cvs.addEventListener('pointerup', function (e) {
+      clearTimeout(longTimer);
+      var d = down;
+      down = null;
+      if (!d || d.moved || d.long || d.button !== 0) return;
+      if (!pickAttacker) return;
+      var u = pickUnitAt(e.clientX, e.clientY);
+      if (!u) { endPick(); return; }
+      if (u === pickAttacker) return;   // ignore self
+      if (pickMode === 'paper') { var thrower = pickAttacker; endPick(); throwPaper(thrower, u); return; }
+      if (u.fight) return;              // someone already on the move can't be punched
+      var att = pickAttacker;
+      endPick();
+      startFight(att, u);
+    });
+    cvs.addEventListener('pointercancel', function () { clearTimeout(longTimer); down = null; });
+
+    function positionLabels() {
+      for (var i = 0; i < unitList.length; i++) {
+        var u = unitList[i];
+        tmpV.set(0, u.anchorY, 0);
+        u.headGrp.localToWorld(tmpV);
+        var dist = tmpV.distanceTo(camera.position);
+        tmpV.project(camera);
+        var vis = tmpV.z < 1 && tmpV.x >= -1 && tmpV.x <= 1 && tmpV.y >= -1 && tmpV.y <= 1;
+        if (vis !== u.shown) { u.shown = vis; u.tag.hidden = !vis; }
+        if (!vis) continue;
+        var x = (tmpV.x * 0.5 + 0.5) * viewW;
+        var y = (-tmpV.y * 0.5 + 0.5) * viewH;
+        if (Math.abs(x - u.lx) > 0.4 || Math.abs(y - u.ly) > 0.4) {
+          u.lx = x; u.ly = y;
+          u.tag.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) translate(-50%,-100%)';
+        }
+        var z = 10000 - Math.round(dist * 100);
+        if (z !== u.lz) { u.lz = z; u.tag.style.zIndex = z; }
+      }
+    }
+
+    var T = 0, last = 0, rafId = 0, clockTick = 0;
+    function updateClock() {
+      var d = new Date();
+      var mins = d.getMinutes() + d.getSeconds() / 60;
+      var hrs = (d.getHours() % 12) + mins / 60;
+      clockMin.rotation.z = -mins / 60 * PI * 2;
+      clockHour.rotation.z = -hrs / 12 * PI * 2;
+    }
+    function frame(now) {
+      rafId = requestAnimationFrame(frame);
+      var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+      last = now;
+      T += dt;
+      stepAnim(dt);
+      if (controls) controls.update();
+      for (var i = 0; i < leaves.length; i++) {
+        var lf = leaves[i];
+        lf.tilt.rotation.x = lf.base + Math.sin(T * 1.6 + lf.phase) * 0.08;
+        lf.tilt.rotation.z = Math.sin(T * 1.1 + lf.phase) * 0.06;
+      }
+      clockTick += dt;
+      if (clockTick > 1) { clockTick = 0; updateClock(); }
+      updatePatrol();
+      if (fights.length) updateFights(dt);
+      if (ballsLive) updateBalls(dt);
+      if (confLive) updateConfetti(dt);
+      for (var j = 0; j < unitList.length; j++) animateUnit(unitList[j], T, dt);
+      renderer.render(scene, camera);
+      positionLabels();
+      if (fights.length) positionPows();
+    }
+    var active = true;   // false while the 2D view is shown: no render loop, no fights
+    function start() { if (!rafId && !document.hidden && active) { last = 0; rafId = requestAnimationFrame(frame); } }
+    function stop() { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stop(); else start(); });
+
+    // ---- theme watching ----
+    function applyTheme() {
+      theme = readTheme();
+      themeStamp++;
+      clearTexCache();
+      applyRoomTheme();
+    }
+    applyTheme();
+    updateClock();
+    var lastItems = null;
+    function onThemeChange() {
+      applyTheme();
+      if (lastItems) sync(lastItems);   // signature includes themeStamp → every desk rebuilds once
+    }
+    try {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      if (mq.addEventListener) mq.addEventListener('change', onThemeChange); else if (mq.addListener) mq.addListener(onThemeChange);
+    } catch (e) {}
+    try {
+      new MutationObserver(onThemeChange).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (e) {}
+    if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+    window.addEventListener('resize', resize);
+
+    // ---- public: sync desk data (called by render) ----
+    function sync(items) {
+      lastItems = items;
+      var seen = {};
+      var groups = { PM: [], BA: [], Dev: [], QC: [] };
+      var list = [];
+      items.forEach(function (it) {
+        var sig = signature(it);
+        var u = units[it.id];
+        if (!u || u.sig !== sig) {
+          if (u) disposeUnit(u);
+          u = buildUnit(it);
+          u.sig = sig;
+          units[it.id] = u;
+        }
+        updateUnit(u, it);
+        seen[it.id] = true;
+        groups[it.canon].push(u);
+        list.push(u);
+      });
+      Object.keys(units).forEach(function (id) {
+        if (!seen[id]) { disposeUnit(units[id]); delete units[id]; }
+      });
+      unitList = list;
+      var changed = layout(groups);
+      stage.classList.toggle('dense', unitList.length > 9 || viewW < 520);
+      if (changed || !framed) reframe();
+    }
+
+    // ---- public: the 2D view took over / handed back the stage ----
+    function hide() {
+      if (!active) return;
+      active = false;
+      stop();
+      clearTimeout(longTimer);
+      down = null;
+      resetEffects();
+    }
+    // drops every fight, patrol, paper ball, confetti burst and reaction (view or session switch)
+    function resetEffects() {
+      closeMenu();
+      endPick();
+      for (var i = fights.length - 1; i >= 0; i--) endFight(fights[i]);
+      unitList.forEach(function (u) { u.hitAmt = 0; u.hitUntil = -1; });
+      clearEffects();
+    }
+    function show() {
+      if (active) return;
+      active = true;
+      viewW = viewH = 1;   // force resize() to re-measure and re-fit the camera
+      resize();
+      start();
+    }
+
+    resize();
+    start();
+    return { sync: sync, show: show, hide: hide, celebrate: celebrate, resetEffects: resetEffects };
+  }
+
+  /* ---- per-session view: #<session> in the URL shows only that coordinator's desks ---- */
+  var SESSION_RE = /^[A-Za-z0-9._~-]+$/;
+  function sessionOf(d) {
+    var s = d.session != null && d.session !== '' ? String(d.session) : String(d.id || '').split('-')[0];
+    return s;
+  }
+  function hashSession() {
+    var h = '';
+    try { h = decodeURIComponent((window.location && window.location.hash || '').replace(/^#/, '')); } catch (e) { h = ''; }
+    return SESSION_RE.test(h) ? h : '';
+  }
+  var currentSession = hashSession();
+  var sessionKey = null;
+  var sessionPicker = document.getElementById('session-picker');
+  var sessionLabel = document.getElementById('session-label');
+
+  function updateSessionUi(desksIn) {
+    var seen = {};
+    (desksIn || []).forEach(function (d) { var s = sessionOf(d); if (s) seen[s] = true; });
+    if (currentSession) seen[currentSession] = true;   // keep an empty session selectable
+    var list = Object.keys(seen).sort();
+    var key = list.join('\n') + '|' + currentSession;
+    if (key !== sessionKey && sessionPicker) {
+      sessionKey = key;
+      sessionPicker.innerHTML = '';
+      var all = document.createElement('option');
+      all.value = '';
+      all.textContent = 'All sessions';
+      sessionPicker.appendChild(all);
+      list.forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s;
+        o.textContent = s;
+        sessionPicker.appendChild(o);
+      });
+      sessionPicker.value = currentSession;
+    }
+    if (sessionLabel) {
+      sessionLabel.hidden = !currentSession;
+      sessionLabel.textContent = currentSession ? '· Session: ' + currentSession : '';
+    }
+  }
+
+  function applySession(s) {
+    s = SESSION_RE.test(s || '') ? s : '';
+    if (s === currentSession) { updateSessionUi(currentDesks()); return; }
+    currentSession = s;
+    if (office3d) office3d.resetEffects();
+    render(currentDesks());
+  }
+
+  if (sessionPicker) {
+    sessionPicker.addEventListener('change', function () {
+      var v = sessionPicker.value;
+      try {
+        if (v) window.location.hash = v;
+        else if (window.history && window.history.replaceState && window.location) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } else if (window.location) window.location.hash = '';
+      } catch (e) {}
+      applySession(v);   // hashchange may not fire (or fires later): apply right away
+    });
+  }
+  try { window.addEventListener('hashchange', function () { applySession(hashSession()); }); } catch (e) {}
+
+  var prevStatus = null;                  // id -> status from the last real snapshot (null before the first)
+  var idleSince = {}, dozeAfterMs = {};   // 2D dozing timers (runtime only)
+  var celebrate2dUntil = {}, clap2dUntil = 0, clapTimer = 0;
+
+  function render(desksIn) {
+    var real = desksIn !== EXAMPLE_DESKS;
+    var fresh = [];
+    if (real) {   // celebrate a real desk turning "done" (never on first load)
+      var next = {};
+      desksIn.forEach(function (d) {
+        var st = d.status || 'idle';
+        if (prevStatus && prevStatus[d.id] !== undefined && prevStatus[d.id] !== 'done' && st === 'done') fresh.push(d.id);
+        next[d.id] = st;
+      });
+      prevStatus = next;
+    }
+    updateSessionUi(desksIn);
+    var shown = currentSession ? desksIn.filter(function (d) { return sessionOf(d) === currentSession; }) : desksIn;
+    var desks = withPlaceholders(shown);
+
+    var now = Date.now();
+    var roleCounts = { PM: 0, BA: 0, Dev: 0, QC: 0 };
+
+    var ordered = desks.slice().sort(function (a, b) {
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+    var items = ordered.map(function (d) {
+      var canon = canonicalRole(d.role);
+      var idx = roleCounts[canon]++;
+      var updated = d.updatedAt ? new Date(d.updatedAt).getTime() : now;
+      var isStale = (d.status !== 'idle' && d.status !== 'done') && (now - updated > STALE_MS);
+      var entry = entryFor(canon, idx) || {};
+      return Object.assign({}, d, {
+        canon: canon,
+        stale: isStale,
+        name: d.name || entry.name,
+        gender: entry.gender,
+        hair: entry.hair,
+        shirt: entry.shirt,
+        hairStyle: entry.hairStyle,
+        outburst: d.placeholder ? null : maybeOutburst(canon, d.status),
+        dozing: dozing2d(d, now)
+      });
+    });
+    var visible = {};
+    items.forEach(function (it) { visible[it.id] = true; });
+
+    lastItems = items;
+    drawActive(fresh.filter(function (id) { return visible[id]; }));
+  }
+
+  function dozing2d(d, now) {
+    if ((d.status || 'idle') !== 'idle') { delete idleSince[d.id]; return false; }
+    if (!idleSince[d.id]) { idleSince[d.id] = now; dozeAfterMs[d.id] = 20000 + Math.random() * 20000; }
+    return now - idleSince[d.id] > dozeAfterMs[d.id];
+  }
+
+  // Only the view on screen is drawn; the other one catches up when switched to.
+  function drawActive(fresh) {
+    var items = lastItems;
+    if (!items) return;   // nothing rendered yet (keeps the 3D intro camera swoop on the first real sync)
+    if (fresh && fresh.length) {
+      var until = Date.now() + 2200;
+      fresh.forEach(function (id) { celebrate2dUntil[id] = until; });
+      clap2dUntil = until;
+      clearTimeout(clapTimer);
+      clapTimer = setTimeout(function () { if (view === '2d' && lastItems) render2d(lastItems); }, 2300);
+    }
+    if (view === '3d') {
+      if (office3d) {
+        office3d.sync(items);
+        if (fresh) fresh.forEach(function (id) { office3d.celebrate(id); });
+      }
+      document.getElementById('empty-msg').hidden = items.length > 0;
+    } else {
+      render2d(items);
+    }
+  }
+
+  /* ================================================================
+     2D office (CSS chibis) — same items as the 3D one
+     ================================================================ */
+  function roleClass(canon) {
+    if (canon === 'PM') return 'role-pm';
+    if (canon === 'BA') return 'role-ba';
+    if (canon === 'QC') return 'role-qc';
+    return 'role-dev';
+  }
+
+  // Chibi built from plain HTML divs (SVG transform-origin is inconsistent
+  // across renderers for nested <g> rotations, so this stays all-HTML).
+  function chibiHtml(gender, hairStyle) {
+    var style = HAIR_STYLES.indexOf(hairStyle) >= 0 ? hairStyle : 'cap';
+    var sideHair = gender === 'f' && !NO_SIDE_LOCKS[style] ? '<div class="hair-side l"></div><div class="hair-side r"></div>' : '';
+    var extra = {
+      ponytail: '<div class="hair-x tail"></div>',
+      braids: '<div class="hair-x braid l"></div><div class="hair-x braid r"></div>',
+      balding: '<div class="hair-x tuft l"></div><div class="hair-x tuft r"></div>',
+      bowl: '<div class="hair-x fringe"></div>'
+    }[style] || '';
+    var capClass = 'hair-cap' + (style === 'cap' ? '' : ' hair-' + style);
+    return '' +
+      '<div class="char-body">' +
+        '<div class="shadow-oval"></div>' +
+        sideHair +
+        '<div class="arm left"></div>' +
+        '<div class="arm right"></div>' +
+        '<div class="torso"></div>' +
+        '<div class="collar"></div>' +
+        '<div class="head-grp">' +
+          '<div class="head">' +
+            '<div class="brow l"></div><div class="brow r"></div>' +
+            '<div class="eye l"></div><div class="eye r"></div>' +
+            '<div class="cheek l"></div><div class="cheek r"></div>' +
+            '<div class="mouth"></div>' +
+          '</div>' +
+          '<div class="' + capClass + '"></div>' +
+          '<div class="hair-shine"></div>' +
+          extra +
+        '</div>' +
+      '</div>';
+  }
+
+  var CONFETTI_2D = ['#ff5c5c', '#ffd84a', '#4fc3f7', '#7bd88f', '#e85c9c', '#b388ff'];
+
+  function buildDesk2d(it, fx) {
+    var wrap = document.createElement('div');
+    wrap.className = 'desk ' + statusClass(it.status);
+    if (it.stale) wrap.classList.add('stale');
+    if (it.placeholder) wrap.classList.add('placeholder');
+    var dozing = it.dozing && !fx.clapping;
+    if (dozing) wrap.classList.add('dozing');
+    if (fx.clapping) wrap.classList.add('clapping');
+
+    var bubble = document.createElement('div');
+    if (fx.clapping) { bubble.className = 'bubble'; bubble.textContent = '👏'; }
+    else if (dozing) { bubble.className = 'bubble zzz'; bubble.textContent = 'Z z z'; }
+    else {
+      bubble.className = 'bubble' + (it.outburst ? ' outburst' : '');
+      bubble.textContent = it.outburst || it.label || '';
+    }
+    bubble.title = bubble.textContent;
+
+    var nameTag = document.createElement('div');
+    nameTag.className = 'name-tag';
+    nameTag.textContent = it.name || '';
+
+    var rolePlate = document.createElement('div');
+    rolePlate.className = 'desk-plate';
+    rolePlate.textContent = it.role || '';
+
+    var pill = document.createElement('div');
+    pill.className = 'status-pill';
+    var dot = document.createElement('i');
+    var label = document.createElement('span');
+    label.textContent = it.placeholder ? 'no work yet' : (it.stale ? 'stale' : (it.status || 'idle'));
+    pill.append(dot, label);
+
+    var sceneEl = document.createElement('div');
+    sceneEl.className = 'scene';
+
+    var chair = document.createElement('div');
+    chair.className = 'chair';
+    chair.innerHTML = '<div class="back"></div><div class="seat"></div><div class="leg l"></div><div class="leg r"></div>';
+
+    var deskTop = document.createElement('div');
+    deskTop.className = 'desk-top';
+
+    var laptop = document.createElement('div');
+    laptop.className = 'laptop';
+    laptop.innerHTML = '<div class="screen"><div class="glow"></div></div><div class="base"></div>';
+
+    var ch = document.createElement('div');
+    ch.className = 'char ' + roleClass(it.canon) + (it.outburst ? ' angry' : '');
+    ch.innerHTML = chibiHtml(it.gender, it.hairStyle) + '<div class="excl">!</div>';
+    if (it.shirt) {
+      ch.style.setProperty('--shirt', it.shirt);
+      ch.style.setProperty('--shirt-dark', shade(it.shirt, 0.78));
+    }
+    if (it.hair) ch.style.setProperty('--hair', it.hair);
+
+    sceneEl.append(chair, ch, deskTop, laptop, rolePlate);
+    wrap.append(bubble, nameTag, pill, sceneEl);
+    if (fx.celebrating) {
+      var conf = document.createElement('div');
+      conf.className = 'confetti';
+      for (var i = 0; i < 16; i++) {
+        var bit = document.createElement('i');
+        bit.style.background = CONFETTI_2D[i % CONFETTI_2D.length];
+        bit.style.setProperty('--dx', Math.round((Math.random() - 0.5) * 130) + 'px');
+        bit.style.setProperty('--dy', Math.round(20 + Math.random() * 60) + 'px');
+        bit.style.setProperty('--r', Math.round((Math.random() - 0.5) * 720) + 'deg');
+        bit.style.setProperty('--d', Math.round(Math.random() * 250) + 'ms');
+        conf.appendChild(bit);
+      }
+      wrap.appendChild(conf);
+    }
+    return wrap;
+  }
+
+  function render2d(items) {
+    var rows = {
+      PM: document.getElementById('row-pm'),
+      BA: document.getElementById('row-ba'),
+      Dev: document.getElementById('row-dev'),
+      QC: document.getElementById('row-qc')
+    };
+    Object.keys(rows).forEach(function (k) { rows[k].innerHTML = ''; });
+    var now = Date.now();
+    Object.keys(celebrate2dUntil).forEach(function (id) { if (celebrate2dUntil[id] <= now) delete celebrate2dUntil[id]; });
+    var anyClap = clap2dUntil > now;
+    items.forEach(function (it) {
+      var celebrating = celebrate2dUntil[it.id] > now;
+      var fx = { celebrating: celebrating, clapping: anyClap && !celebrating };
+      (rows[it.canon] || rows.Dev).appendChild(buildDesk2d(it, fx));
+    });
+    Object.keys(rows).forEach(function (k) { rows[k].classList.toggle('empty', !rows[k].firstChild); });
+    document.getElementById('empty-msg-2d').hidden = items.length > 0;
+  }
+
+  function buildShelf() {
+    var shelf = document.getElementById('shelf');
+    if (!shelf) return;
+    var colors = ['#e2683a', '#6c7ee8', '#2fb3a1', '#e85c9c', '#f0b73a'];
+    var left = 0;
+    colors.forEach(function (c, i) {
+      var book = document.createElement('div');
+      book.className = 'book';
+      book.style.height = (20 + (i % 3) * 5) + 'px';
+      book.style.left = left + 'px';
+      book.style.background = c;
+      shelf.appendChild(book);
+      left += 11;
+    });
+  }
+
+  /* ================================================================
+     view switch (2D | 3D), remembered per browser
+     ================================================================ */
+  var VIEW_KEY = 'agent-office-view';
+  var view = '3d';
+  var lastItems = null;
+  try { if (localStorage.getItem(VIEW_KEY) === '2d') view = '2d'; } catch (e) {}
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll('#view-switch button'));
+
+  function setView(v, save) {
+    view = v === '2d' ? '2d' : '3d';
+    if (save) { try { localStorage.setItem(VIEW_KEY, view); } catch (e) {} }
+    viewButtons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === view)); });
+    var el2d = document.getElementById('office-2d');
+    var el3d = document.getElementById('office-3d');
+    if (view === '3d') {
+      el2d.hidden = true;
+      el3d.hidden = false;
+      if (office3d) office3d.show();
+    } else {
+      if (office3d) office3d.hide();
+      el3d.hidden = true;
+      el2d.hidden = false;
+    }
+    drawActive();
+  }
+
+  viewButtons.forEach(function (b, i) {
+    b.addEventListener('click', function () { if (b.getAttribute('data-view') !== view) setView(b.getAttribute('data-view'), true); });
+    b.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      var next = viewButtons[(i + (e.key === 'ArrowRight' ? 1 : viewButtons.length - 1)) % viewButtons.length];
+      next.focus();
+      setView(next.getAttribute('data-view'), true);
+    });
+  });
+  buildShelf();
+  setView(view, false);
+
+  function tryDb() {
+    if (!window.claude || !window.claude.use) { render(EXAMPLE_DESKS); return; }
+    window.claude.use('db').then(function (db) {
+      if (!db) { render(EXAMPLE_DESKS); return; }
+      usingExample = false;
+      subscribe(db);
+    }).catch(function () { render(EXAMPLE_DESKS); });
+  }
+
+  function subscribe(db) {
+    var loadTimer = setTimeout(function () {
+      if (usingExample) render(EXAMPLE_DESKS);
+    }, 10000);
+
+    try {
+      db.collection('desks').onSnapshot(function (snap) {
+        clearTimeout(loadTimer);
+        var list = (snap && snap.docs ? snap.docs : []).map(function (doc) {
+          return Object.assign({ id: doc.id }, doc.data() || {});
+        });
+        desksById = {};
+        list.forEach(function (d) { desksById[d.id] = d; });
+        render(list.length ? list : []);
+      }, function () {
+        clearTimeout(loadTimer);
+        render(EXAMPLE_DESKS);
+      });
+    } catch (e) {
+      clearTimeout(loadTimer);
+      render(EXAMPLE_DESKS);
+    }
+  }
+
+  var toggleBtn = document.getElementById('names-toggle');
+  var namesPanel = document.getElementById('names-panel');
+  if (toggleBtn && namesPanel) {
+    toggleBtn.addEventListener('click', function () {
+      var open = namesPanel.hidden;
+      namesPanel.hidden = !open;
+      toggleBtn.setAttribute('aria-expanded', String(open));
+      toggleBtn.textContent = open ? 'Hide names' : 'Name the team';
+    });
+  }
+  renderNamesPanel();
+
+  render(EXAMPLE_DESKS);
+  tryDb();
+
+  // Re-render periodically: refreshes staleness fading and re-rolls bubble
+  // text (real label vs. a censored outburst) — purely cosmetic, no db calls.
+  // Only desks whose look changed are rebuilt; the rest just get new text/state.
+  setInterval(function () { render(currentDesks()); }, 4500);
+})();
+</script>
+
+<script>
+(function () {
+  var KEY = "agent-office-title";
+  var h1 = document.getElementById("office-title");
+  var input = document.getElementById("office-name-input");
+  function apply(name) {
+    var t = (name || "").trim() || "Agent Office";
+    h1.textContent = t;
+    document.title = t;
+  }
+  var saved = "";
+  try { saved = localStorage.getItem(KEY) || ""; } catch (e) {}
+  input.value = saved;
+  apply(saved);
+  input.addEventListener("input", function () {
+    try { localStorage.setItem(KEY, input.value); } catch (e) {}
+    apply(input.value);
+  });
+})();
+</script>
