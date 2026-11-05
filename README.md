@@ -75,6 +75,10 @@ By hand (local): delete `.agent-office/desks/<label>-*.json`.
   someone, 👊👊 gang-punch them, or 📄 throw a paper ball. Punchers power up (golden spiky hair, a gold aura), dash in
   and punch one after another round a ring; the last punch knocks the target flying — it lies 3 s, then teleports
   home. The boss teleports to patrol now and then or ⚡ zap, then back to the desk; finished work gets confetti.
+- **★ Boss bar** (bottom-left of the 3D office): one click for the whole team — ⚡ the boss turns storm god (a winged
+  helm; a war hammer and a storm axe fly in and cross overhead) and drops a column of lightning on everyone, who
+  stay sooty and smoking for 3 s, 📄 a paper ball at each person, 👊 a punch round (the boss flies straight from one
+  knocked-out person to the next, home after the last), ☕ a 10 s coffee break in the pantry.
 - Characters vent censored outbursts (`#@!%`) with a fiery angry face when work is hard.
 - **Stale after N min** (Team drawer, default 15, 0 = off): a working / reviewing / blocked desk with no update for
   that long fades and the boss ⚡ zaps it; a working desk's pill shows how long it has been working.

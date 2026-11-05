@@ -323,6 +323,31 @@
     white-space: nowrap;
   }
   .view-3d .pick-hint[hidden] { display: none; }
+  /* boss action bar: one click applies an action to the whole team */
+  .view-3d .boss-bar {
+    position: absolute;
+    left: 12px; bottom: 10px;
+    z-index: 20001;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+  }
+  .view-3d .boss-bar .boss-bar-label { font-size: 0.66rem; font-weight: 800; color: var(--muted); padding: 0 4px 0 6px; }
+  .view-3d .boss-bar button {
+    width: 36px; height: 36px;
+    border: none;
+    border-radius: 9px;
+    background: var(--bg);
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .view-3d .boss-bar button:hover { background: var(--accent); }
   .view-3d .stage.picking, .view-3d .stage.picking:active { cursor: crosshair; }
   .view-3d .tag.hl .name-tag { color: var(--accent); }
   .view-3d .tag.hl .bubble { border-color: var(--accent); }
@@ -1227,6 +1252,7 @@
       <div class="hint">Drag to look around · scroll to zoom · right-click someone</div>
       <div class="ctx-menu" id="ctx-menu" hidden><button type="button" id="ctx-punch" title="Punch" aria-label="Punch">👊</button><button type="button" class="gang" id="ctx-gang" title="Gang punch" aria-label="Gang punch">👊👊</button><button type="button" id="ctx-paper" title="Throw paper" aria-label="Throw paper">📄</button><button type="button" id="ctx-zap" title="Zap" aria-label="Zap">⚡</button></div>
       <div class="pick-hint" id="pick-hint" hidden>Pick who to punch · Esc to cancel</div>
+      <div class="boss-bar" id="boss-bar"><span class="boss-bar-label">★ Boss</span><button type="button" data-act="storm" title="Lightning on everyone" aria-label="Lightning on everyone">⚡</button><button type="button" data-act="paper" title="Paper ball at everyone" aria-label="Paper ball at everyone">📄</button><button type="button" data-act="punch" title="Punch everyone, one by one" aria-label="Punch everyone, one by one">👊</button><button type="button" data-act="coffee" title="Coffee break for everyone (10 s)" aria-label="Coffee break for everyone">☕</button></div>
     </div>
   </div>
 
@@ -1981,7 +2007,7 @@
     })();
 
     // pantry (annex right of the office): counter + coffee machine on the back wall, a round table, 6 spots
-    var PW = 3.6, PANTRY_N = 6;
+    var PW = 3.6, PANTRY_N = 12;
     var pantrySpots = [];
     for (var ps0 = 0; ps0 < PANTRY_N; ps0++) pantrySpots.push({ x: 0, z: 0, face: 0, u: null });
     room.pantry = new THREE.Group();
@@ -2058,10 +2084,11 @@
       room.pCounter.position.set(0.2, 0, zB + 0.3);
       var tz = zB + Math.max(2.3, D * 0.5);
       room.pTable.position.set(0, 0, tz);
-      for (var si = 0; si < PANTRY_N; si++) {   // a ring round the table, each facing it
-        var sa = si / PANTRY_N * PI * 2 + PI + 0.3;   // the first spot behind the table, facing the camera
+      for (var si = 0; si < PANTRY_N; si++) {   // two rings of 6 round the table, each spot facing it
+        var outer = si >= 6, sr = outer ? 1.55 : 0.95;
+        var sa = (si % 6) / 6 * PI * 2 + PI + (outer ? 0.82 : 0.3);   // the first spot behind the table, facing the camera
         var sp = pantrySpots[si];
-        sp.x = pcx + Math.sin(sa) * 0.95; sp.z = tz + Math.cos(sa) * 0.95;
+        sp.x = pcx + Math.sin(sa) * sr; sp.z = tz + Math.cos(sa) * sr;
         sp.face = Math.atan2(pcx - sp.x, tz - sp.z);
       }
       target.x = PW / 2;   // frame the office + pantry together
@@ -2409,6 +2436,8 @@
         cup: cup, doneAt: -9,
         // punch power-up + being beaten up
         aura: aura, power: 0, hairMats: [m.hair, m.hairDark], hairBase: [m.hair.color.clone(), m.hairDark.color.clone()],
+        // charred by the boss's lightning
+        charUntil: -1, char: 0, charMats: [m.skin, m.shirt], shirtBase: m.shirt.color.clone(), charSmokeT: 0,
         beatBy: null, beatFace: 0
       };
       body.userData.unit = u;
@@ -2803,11 +2832,19 @@
       if (zapped && !f) {   // being zapped: arms flung out stiff, head straight
         lX = rX = -0.55; lZ = rZ = 0.75; headX = 0; headY = 0; exclOn = false;
       }
+      if (u.castUntil > T && !f) {   // the boss calling down lightning: floats up off the chair, powered up, arms high
+        stand = 1; xOff = 0; rotY = 0; headX = -0.18; headY = 0; exclOn = false;
+        bob = 0.38 + Math.sin(t * 6) * 0.04;
+        rX = -3.05; rZ = 0.12;                                  // the baton straight up at the sky
+        lX = -0.3; lZ = 2.4 + Math.sin(t * 30) * 0.08;          // the other arm flung out
+        if (u.taser && !u.taser.visible) u.taser.visible = true;
+      } else if (u.taser && u.taser.visible && !(f && f.zap)) u.taser.visible = false;
       if (u.beatBy && !f) {   // being beaten up: on its feet, guard up, turned to the current puncher
         stand = 1; xOff = 0; rotY = u.beatFace; headX = 0; headY = 0; exclOn = false;
         lX = rX = -1.9; lZ = rZ = -0.35;
       }
-      var pwT = f && f.g && (f.phase === 'charge' || f.phase === 'dash' || f.phase === 'ready' || f.phase === 'punch') ? 1 : 0;
+      var pwT = (f && f.g && (f.phase === 'charge' || f.phase === 'dash' || f.phase === 'ready' || f.phase === 'punch')) ||
+        (u.castUntil > T && !f) ? 1 : 0;
       if (pwT || u.power) {
         u.power += (pwT - u.power) * (1 - Math.exp(-dt * (pwT ? 4 : 3)));
         if (!pwT && u.power < 0.003) u.power = 0;
@@ -2848,10 +2885,28 @@
         u.rageApplied = u.rage;
         u.headSkin.color.copy(u.skinBase).lerp(RAGE_SKIN, u.rage * 0.85);
       }
+      // charred by lightning: soot-black skin, shirt and hair, smoking, for a few seconds, then back to normal
+      var charT = u.charUntil > T ? 1 : 0;
+      if (charT || u.char) {
+        u.char += (charT - u.char) * (1 - Math.exp(-dt * (charT ? 12 : 1.5)));
+        if (!charT && u.char < 0.01) u.char = 0;
+        var ck = u.char * 0.82;
+        u.headSkin.color.copy(u.skinBase).lerp(RAGE_SKIN, u.rage * 0.85).lerp(SOOT, ck);
+        u.charMats[0].color.copy(u.skinBase).lerp(SOOT, ck);
+        u.charMats[1].color.copy(u.shirtBase).lerp(SOOT, ck);
+        for (var hc = 0; hc < u.hairMats.length; hc++) u.hairMats[hc].color.copy(u.hairBase[hc]).lerp(POWER_HAIR, u.power).lerp(SOOT, ck);
+        u.charSmokeT -= dt;
+        if (charT && u.charSmokeT <= 0) {
+          u.charSmokeT = 0.7 + Math.random() * 0.4;
+          stormV.set(0, 0.7, 0); u.headGrp.localToWorld(stormV);
+          poofAt(stormV.x, stormV.y - 0.3, stormV.z);
+        }
+      }
       var dizzy = T < (u.hitUntil || -1) + 0.7;
       setFace(u, zapped ? 'zapped' : (dizzy ? 'dizzy' : (zapping ? 'smug' :
         (u.rage > 0.5 || u.power > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')))));
-      setOverText(u, annoyed ? '?!' : (f && f.zap && f.phase === 'zap' ? f.say : (f && f.g && f.phase === 'charge' ? 'HAAA!' : '')));
+      setOverText(u, annoyed ? '?!' : (f && f.zap && f.phase === 'zap' ? f.say : (f && f.g && f.phase === 'charge' ? 'HAAA!' :
+        (u.castUntil > T && !f ? '⚡ Everyone, faster!' : ''))));
       if (u.dozing !== u.zzz.visible) u.zzz.visible = u.dozing;
       if (u.dozing) {
         for (var zk = 0; zk < 3; zk++) {
@@ -2918,8 +2973,8 @@
         if (u.zapGlowHex) setZapGlow(u, 0);
       }
       var hgs = u.hairGrp.scale.y;
-      if (zapped || hgs !== 1 || u.power) {
-        var hgT = zapped ? 1.6 + Math.random() * 0.15 * (REDUCE_MOTION ? 0 : 1) : 1 + 0.55 * u.power;
+      if (zapped || hgs !== 1 || u.power || u.char) {
+        var hgT = zapped ? 1.6 + Math.random() * 0.15 * (REDUCE_MOTION ? 0 : 1) : (u.char > 0.3 ? 1.45 : 1 + 0.55 * u.power);
         hgs += (hgT - hgs) * (1 - Math.exp(-dt * (zapped ? 25 : 2.5)));
         if (!zapped && Math.abs(hgs - 1) < 0.01) hgs = 1;
         u.hairGrp.scale.set(1 + (hgs - 1) * 0.2, hgs, 1 + (hgs - 1) * 0.2);
@@ -3030,6 +3085,26 @@
       f.pow.appendChild(sp);
     }
     function faceOf(from, to) { return Math.atan2(to.x - from.x, to.z - from.z); }
+    function startDash(f) {
+      computePath(f);
+      var dx = f.path[1].x - f.pos.x, dz = f.path[1].z - f.pos.z;
+      f.phase = 'dash'; f.t = 0; f.fx = f.pos.x; f.fz = f.pos.z;
+      f.dashT = Math.max(DASH_T, Math.sqrt(dx * dx + dz * dz) / 9);
+    }
+    // the punch round: leave the knocked-out one, take on the next target from where the boss stands
+    function retarget(f, nx) {
+      var old = f.g, oi = old.members.indexOf(f);
+      if (oi >= 0) old.members.splice(oi, 1);
+      removePow(f);
+      var a = f.att.root.position, b = nx.root.position;
+      var dx = b.x - a.x, sideA = dx < -0.01 ? -1 : 1;
+      f.sideT = Math.abs(dx) > 0.01 ? -sideA : sideA;
+      f.tgt = nx;
+      f.tgtPos.copy(b);
+      f.hit = false;
+      joinBeating(newBeating(nx), f);
+      startDash(f);
+    }
     function impact(f) {
       var g = f.g, tg = f.tgt, tp = tg.root.position;
       var hx = tp.x - f.pos.x, hz = tp.z - f.pos.z, hd = Math.sqrt(hx * hx + hz * hz) || 1;
@@ -3175,9 +3250,9 @@
           }
         } else if (f.phase === 'charge') {
           if (!f.tgt) goBack(f);
-          else if (f.t > CHARGE_T) { f.phase = 'dash'; f.t = 0; f.fx = f.pos.x; f.fz = f.pos.z; }
+          else if (f.t > CHARGE_T) startDash(f);
         } else if (f.phase === 'dash') {
-          var dk = Math.min(1, f.t / DASH_T), de = dk * (2 - dk);
+          var dk = Math.min(1, f.t / (f.dashT || DASH_T)), de = dk * (2 - dk);
           f.pos.x = f.fx + (f.path[1].x - f.fx) * de;
           f.pos.z = f.fz + (f.path[1].z - f.fz) * de;
           if (f.tgt) f.face = faceOf(f.pos, f.tgt.root.position);
@@ -3229,7 +3304,7 @@
           }
         } else if (f.phase === 'coffee') {   // until the desk is no longer done (or hidden by the page)
           f.pos.x = f.path[1].x; f.pos.z = f.path[1].z; f.face = f.spot.face;
-          if (f.att.status !== 'done') goBack(f);
+          if (f.until ? T > f.until : f.att.status !== 'done') goBack(f);   // a boss coffee break ends on time
         } else if (f.phase === 'look') {    // patrol stop: glare around, then the next spot (or home)
           f.face += Math.sin(f.t * 2.2) * dt * 1.6;
           if (f.t > TP_LOOK) { f.tpIdx = f.tpIdx + 1 < f.n ? f.tpIdx + 1 : 0; f.phase = 'tpOut'; f.t = 0; }
@@ -3239,7 +3314,11 @@
             if (!f.g.launched) f.face = faceOf(f.pos, f.tgt.root.position);
             if (!f.hit && f.t >= HIT_AT) { f.hit = true; impact(f); }
             if (f.t > PUNCH_T) {
-              if (f.g.launched) { f.g.done = true; goBack(f); }
+              if (f.g.launched) {
+                f.g.done = true;
+                var nx = punchChain && f.att === bossUnit() ? nextChainTarget() : null;
+                if (nx) retarget(f, nx); else goBack(f);
+              }
               else { f.g.turn++; f.phase = 'ready'; f.t = 0; removePow(f); }
             }
           }
@@ -3280,7 +3359,7 @@
     /* ---- boss teleport: the PM shrinks away in a puff and pops up at the spot (and back home) ---- */
     var TP_T = 0.22, TP_LOOK = 1.8, POOF_LIFE = 0.6;
     var poofs = [], poofI = 0, poofsLive = 0;
-    for (var pf0 = 0; pf0 < 2; pf0++) {   // two pools: the spot left and the spot arrived at
+    for (var pf0 = 0; pf0 < 16; pf0++) {   // a ring of puffs: the spot left, the spot arrived at, lightning smoke
       var pfMat = new THREE.MeshBasicMaterial({ color: 0xd9c8ff, transparent: true, opacity: 0, depthWrite: false });
       var pfM = [];
       for (var pf1 = 0; pf1 < 6; pf1++) { var pfm = new THREE.Mesh(G.puff, pfMat); pfm.visible = false; scene.add(pfm); pfM.push(pfm); }
@@ -3311,10 +3390,10 @@
 
     /* ---- pantry: a desk that turns "done" teleports out for a coffee, back when its status changes ---- */
     var PANTRY_AFTER = 2.5;   // s after turning done: the confetti / wave at the desk first
-    function startPantry(u, spot) {
+    function startPantry(u, spot, until) {
       var a = u.root.position;
       var f = {
-        att: u, tgt: null, pantry: true, spot: spot, phase: 'stand', t: 0, n: 2, tpIdx: 0,
+        att: u, tgt: null, pantry: true, spot: spot, until: until || 0, phase: 'stand', t: 0, n: 2, tpIdx: 0,
         path: [new THREE.Vector3(a.x, 0, a.z), new THREE.Vector3(spot.x, 0, spot.z)],
         pos: new THREE.Vector3(a.x + u.p.xOff, a.y, a.z), tgtPos: a.clone(), gy: a.y,
         face: 0, sideT: 1, pow: null, powT: 0, powI: 0,
@@ -3335,6 +3414,264 @@
         if (!spot) return;   // full: the rest keep waving at their desks
         startPantry(u, spot);
       }
+    }
+
+    /* ---- boss action bar: one action for the whole team (purely visual) ---- */
+    var STORM = { storm: true };            // zapBy marker for a lightning strike
+    // the boss's thunder-god turn: a winged helm appears, a war hammer and a storm axe fly in from both sides
+    // and cross overhead, then a column of lightning drops on every free desk; the struck are left sooty 3 s
+    var STORM_N = 16, STORM_SEG = 7;
+    var TH_HELM = 0.4, TH_FLY0 = 0.35, TH_FLY1 = 1.15, TH_CROSS = 1.5, TH_BOLT_END = 2.6, TH_END = 3.3;
+    var CHAR_T = 3;
+    var SOOT = new THREE.Color('#2b2522');
+    var thMat = {
+      steel: new THREE.MeshLambertMaterial({ color: 0xc9d2e0 }),
+      dark: new THREE.MeshLambertMaterial({ color: 0x59606f }),
+      wood: new THREE.MeshLambertMaterial({ color: 0x7a4f2c }),
+      wing: new THREE.MeshLambertMaterial({ color: 0xf4f6fb }),
+      core: new THREE.MeshBasicMaterial({ color: 0xfffbe0 }),
+      glow: new THREE.MeshBasicMaterial({ color: 0x4aa8ff, transparent: true, opacity: 0.55, depthWrite: false })
+    };
+    var helm = new THREE.Group();   // a steel dome, a dark rim, two swept white wings
+    (function () {
+      helm.add(new THREE.Mesh(new THREE.SphereGeometry(0.44, 16, 10, 0, PI * 2, 0, PI / 2), thMat.steel));
+      var rim = new THREE.Mesh(G.cyl, thMat.dark); rim.scale.set(0.92, 0.06, 0.92); helm.add(rim);
+      [-1, 1].forEach(function (sd) {
+        var wing = new THREE.Group(); wing.position.set(sd * 0.4, 0.12, 0); wing.rotation.z = -sd * 0.5; helm.add(wing);
+        for (var fi = 0; fi < 3; fi++) {
+          var fe = new THREE.Mesh(G.box, thMat.wing);
+          fe.scale.set(0.05, 0.34 - fi * 0.07, 0.1);
+          fe.position.set(sd * fi * 0.05, 0.12 - fi * 0.03, -0.06 * fi);
+          fe.rotation.x = -0.35 - fi * 0.15;
+          wing.add(fe);
+        }
+      });
+    })();
+    helm.visible = false;
+    function makeHammer() {   // a short handle and a big square head
+      var g = new THREE.Group();
+      var h = new THREE.Mesh(G.cyl, thMat.wood); h.scale.set(0.07, 0.6, 0.07); g.add(h);
+      var head = new THREE.Mesh(G.box, thMat.steel); head.scale.set(0.42, 0.24, 0.24); head.position.y = 0.36; g.add(head);
+      var band = new THREE.Mesh(G.box, thMat.dark); band.scale.set(0.12, 0.26, 0.26); band.position.y = 0.36; g.add(band);
+      return g;
+    }
+    function makeAxe() {      // a long handle, a broad blade with a bright edge, a spike on the back
+      var g = new THREE.Group();
+      var h = new THREE.Mesh(G.cyl, thMat.wood); h.scale.set(0.06, 0.8, 0.06); g.add(h);
+      var blade = new THREE.Mesh(G.box, thMat.steel); blade.scale.set(0.3, 0.32, 0.04); blade.position.set(0.17, 0.3, 0); g.add(blade);
+      var edge = new THREE.Mesh(G.box, thMat.core); edge.scale.set(0.04, 0.36, 0.05); edge.position.set(0.33, 0.3, 0); g.add(edge);
+      var spike = new THREE.Mesh(G.box, thMat.dark); spike.scale.set(0.14, 0.08, 0.06); spike.position.set(-0.1, 0.32, 0); g.add(spike);
+      return g;
+    }
+    var hammer = makeHammer(), axe = makeAxe();
+    hammer.visible = axe.visible = false;
+    hammer.scale.setScalar(1.7); axe.scale.setScalar(1.7);
+    scene.add(hammer); scene.add(axe);
+    // lightning columns: per bolt a chain of segments, a white-hot core inside a blue glow (reads on light floors)
+    var bolts = [];
+    function getBolt(i) {
+      while (bolts.length <= i) {
+        var b = { core: [], glow: [] };
+        for (var sg = 0; sg < STORM_SEG; sg++) {
+          var c = new THREE.Mesh(G.cyl, thMat.core); c.visible = false; c.renderOrder = 6; scene.add(c); b.core.push(c);
+          var gl = new THREE.Mesh(G.cyl, thMat.glow); gl.visible = false; gl.renderOrder = 5; scene.add(gl); b.glow.push(gl);
+        }
+        bolts.push(b);
+      }
+      return bolts[i];
+    }
+    var boltA = new THREE.Vector3(), boltB = new THREE.Vector3(), boltD = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+    function placeSeg(m, a, b, w) {
+      boltD.subVectors(b, a);
+      var len = boltD.length() || 0.001;
+      m.position.addVectors(a, b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(UP, boltD.divideScalar(len));
+      m.scale.set(w, len + w * 0.6, w);
+      m.visible = true;
+    }
+    function drawBolt(i, tx, ty, tz, w) {   // a jagged column from the sky down to (tx, ty, tz)
+      var b = getBolt(i);
+      var x0 = tx + (Math.random() - 0.5) * 0.6, y0 = WALL_H + 0.6, z0 = tz + (Math.random() - 0.5) * 0.6;
+      boltA.set(x0, y0, z0);
+      for (var sg = 1; sg <= STORM_SEG; sg++) {
+        var k = sg / STORM_SEG, jit = sg < STORM_SEG ? 0.3 * (1 - k * 0.5) : 0;
+        boltB.set(x0 + (tx - x0) * k + (Math.random() - 0.5) * 2 * jit, y0 + (ty - y0) * k,
+          z0 + (tz - z0) * k + (Math.random() - 0.5) * 2 * jit);
+        placeSeg(b.glow[sg - 1], boltA, boltB, w * 2.6);
+        placeSeg(b.core[sg - 1], boltA, boltB, w);
+        boltA.copy(boltB);
+      }
+    }
+    function hideBolts() {
+      for (var i = 0; i < bolts.length; i++) {
+        for (var sg = 0; sg < STORM_SEG; sg++) { bolts[i].core[sg].visible = false; bolts[i].glow[sg].visible = false; }
+      }
+    }
+    var storm = null;       // { boss, targets, t, drawT, struck, done, hemiBase }
+    var punchChain = null;  // { list, idx }
+    var bossQueue = [];     // [{ at, fn }] timed steps (paper volley)
+    var stormV = new THREE.Vector3(), headV = new THREE.Vector3();
+
+    function teamTargets(boss) {
+      var a = [];
+      for (var i = 0; i < unitList.length; i++) {
+        var u = unitList[i];
+        if (u !== boss && u.canon !== 'PM' && !u.dead && !u.fight && !u.zapBy && !u.beatBy) a.push(u);
+      }
+      return a;
+    }
+    function bossBusy(boss) { return !boss || boss.fight || boss.beatBy || boss.castUntil > T || storm || punchChain || bossQueue.length; }
+    // '' = started, otherwise why not
+    function bossAction(kind) {
+      if (!roomDims.W || !active) return 'Not ready';
+      var boss = bossUnit();
+      if (kind === 'coffee') {
+        var list = teamTargets(null);
+        var n = 0;
+        for (var i = 0; i < list.length; i++) {
+          var spot = null;
+          for (var j = 0; j < pantrySpots.length; j++) if (!pantrySpots[j].u) { spot = pantrySpots[j]; break; }
+          if (!spot) break;
+          startPantry(list[i], spot, T + 0.9 + 10);   // ~0.9 s to stand up and blink over, then 10 s of coffee
+          n++;
+        }
+        return n ? '' : 'Nobody free for a break';
+      }
+      if (!boss) return 'No boss in the office';
+      if (bossBusy(boss)) return 'The boss is busy';
+      var targets = teamTargets(boss);
+      if (!targets.length) return 'Nobody free';
+      wake(boss);
+      if (kind === 'storm') {
+        boss.castUntil = T + TH_END;
+        storm = { boss: boss, targets: targets.slice(0, STORM_N - 1), t: 0, drawT: 0, struck: false, done: false, hemiBase: -1 };
+      } else if (kind === 'paper') {
+        targets.slice(0, BALL_MAX).forEach(function (u, k) {
+          bossQueue.push({ at: T + k * 0.3, fn: function () { if (!u.dead && !boss.dead) throwPaper(boss, u); } });
+        });
+      } else if (kind === 'punch') {
+        punchChain = { list: targets, idx: 0 };
+      } else return 'Unknown action';
+      return '';
+    }
+    function nextChainTarget() {
+      while (punchChain && punchChain.idx < punchChain.list.length) {
+        var u = punchChain.list[punchChain.idx++];
+        if (!u.dead && !u.fight && !u.beatBy && !u.zapBy) return u;
+      }
+      return null;
+    }
+    function updateBossActions(dt) {
+      if (bossQueue.length) {
+        for (var q = bossQueue.length - 1; q >= 0; q--) if (T >= bossQueue[q].at) { var step = bossQueue[q]; bossQueue.splice(q, 1); step.fn(); }
+      }
+      if (punchChain) {
+        var boss = bossUnit();
+        if (!boss) punchChain = null;
+        else if (!boss.fight && !boss.beatBy) {
+          var first = nextChainTarget();   // the first target; the rest follow on from the fight itself
+          if (!first || !startPunch(boss, first)) punchChain = null;
+        }
+      }
+      if (storm) updateStorm(dt);
+    }
+    function easeOut(k) { return 1 - (1 - k) * (1 - k); }
+    // a weapon's flight: in from far off to one side (spinning), up into an X over the head, back out
+    function placeWeapon(w, sd, t, hd) {
+      if (t < TH_FLY0) { w.visible = false; return; }
+      var hx = hd.x + sd * 0.85, hy = hd.y - 0.05, hz = hd.z + 0.1;           // held at the side
+      var cx = hd.x + sd * 0.15, cy = hd.y + 1.0, cz = hd.z + 0.05;           // crossed overhead
+      var fx = hd.x + sd * 3.2, fy = hd.y + 1.6, fz = hd.z + 0.8;             // far off
+      var x, y, z, rz, k;
+      if (t < TH_FLY1) {
+        k = easeOut((t - TH_FLY0) / (TH_FLY1 - TH_FLY0));
+        x = fx + (hx - fx) * k; y = fy + (hy - fy) * k + Math.sin(k * PI) * 0.5; z = fz + (hz - fz) * k;
+        rz = (1 - k) * 10 * sd;
+      } else if (t < TH_CROSS) {
+        k = smooth01((t - TH_FLY1) / (TH_CROSS - TH_FLY1));
+        x = hx + (cx - hx) * k; y = hy + (cy - hy) * k; z = hz + (cz - hz) * k;
+        rz = sd * 0.75 * k;
+      } else if (t < TH_BOLT_END) {
+        x = cx; y = cy; z = cz; rz = sd * 0.75;
+      } else {
+        k = smooth01((t - TH_BOLT_END) / (TH_END - TH_BOLT_END));
+        x = cx + (fx - cx) * k; y = cy + (fy - cy) * k; z = cz + (fz - cz) * k;
+        rz = sd * 0.75 + k * 10 * sd;
+      }
+      w.visible = true;
+      w.position.set(x, y, z);
+      w.rotation.set(0, 0, rz);
+    }
+    function updateStorm(dt) {
+      var st = storm, boss = st.boss;
+      if (boss.dead) { stopStorm(); return; }
+      st.t += dt;
+      var t = st.t;
+      if (helm.parent !== boss.headGrp) { boss.headGrp.add(helm); helm.position.set(0, 0.62, 0); }
+      var hs = t < TH_HELM ? easeOut(t / TH_HELM) : (t > TH_BOLT_END ? Math.max(0, 1 - (t - TH_BOLT_END) / (TH_END - TH_BOLT_END)) : 1);
+      helm.visible = hs > 0.01;
+      helm.scale.setScalar(Math.max(0.001, hs));
+      headV.set(0, 0.5, 0); boss.headGrp.localToWorld(headV);
+      placeWeapon(hammer, -1, t, headV);
+      placeWeapon(axe, 1, t, headV);
+      if (t >= TH_CROSS && !st.struck) {   // the strike: a flash, and everyone lights up at once
+        st.struck = true;
+        st.hemiBase = hemi.intensity;
+        st.targets.forEach(function (u) { if (!u.dead && !u.zapBy && !u.fight) { u.zapBy = STORM; wake(u); } });
+      }
+      if (st.struck && !st.done) {
+        if (t >= TH_BOLT_END) {   // bolts off: the struck ones are left sooty and smoking
+          st.done = true;
+          hideBolts();
+          hemi.intensity = st.hemiBase;
+          st.targets.forEach(function (u) {
+            if (u.zapBy !== STORM) return;
+            u.zapBy = null;
+            setZapGlow(u, 0);
+            if (u.body.rotation.z) u.body.rotation.z = 0;
+            u.charUntil = T + CHAR_T;
+            u.hitUntil = T + CHAR_T;
+            stormV.set(0, 0.6, 0); u.headGrp.localToWorld(stormV);
+            poofAt(stormV.x, stormV.y - 0.3, stormV.z);
+          });
+        } else {
+          hemi.intensity = st.hemiBase + (Math.random() < 0.35 ? 0.45 : 0.08);   // flicker
+          st.drawT -= dt;
+          if (st.drawT <= 0) {
+            st.drawT = 0.06;
+            hideBolts();
+            drawBolt(0, headV.x, headV.y + 1.55, headV.z + 0.05, 0.08);   // one into the crossed weapons
+            var bi = 1;
+            st.targets.forEach(function (u) {
+              if (u.dead || u.zapBy !== STORM) return;
+              stormV.set(0, 0.45, 0); u.headGrp.localToWorld(stormV);
+              drawBolt(bi++, stormV.x, stormV.y, stormV.z, 0.1);
+            });
+          }
+        }
+      }
+      if (t >= TH_END) stopStorm();
+    }
+    function stopStorm() {
+      if (!storm) return;
+      hideBolts();
+      if (storm.hemiBase >= 0 && !storm.done) hemi.intensity = storm.hemiBase;
+      storm.targets.forEach(function (u) {
+        if (u.zapBy !== STORM) return;
+        u.zapBy = null;
+        setZapGlow(u, 0);
+        if (u.body.rotation.z) u.body.rotation.z = 0;
+      });
+      if (helm.parent) helm.parent.remove(helm);
+      helm.visible = hammer.visible = axe.visible = false;
+      storm = null;
+    }
+    function resetBossActions() {
+      stopStorm();
+      unitList.forEach(function (u) { u.charUntil = -1; });
+      punchChain = null;
+      bossQueue.length = 0;
+      unitList.forEach(function (u) { u.castUntil = -1; });
     }
 
     /* ---- boss patrol: every 60–120 s the PM teleports to a few spots in the aisles, glares, and back ---- */
@@ -3371,7 +3708,7 @@
         patrolAt = T + 60 + Math.random() * 60;
         for (var i = 0; i < unitList.length; i++) {
           var c = unitList[i];
-          if (c.canon === 'PM' && !c.dead && !c.fight && !c.beatBy) { if (roomDims.W) patrolFight = startPatrol(c); break; }
+          if (c.canon === 'PM' && !c.dead && !c.fight && !c.beatBy && !(c.castUntil > T) && !punchChain && !bossQueue.length) { if (roomDims.W) patrolFight = startPatrol(c); break; }
         }
       }
       var f = patrolFight;
@@ -3720,6 +4057,7 @@
     }
 
     function clearEffects() {
+      resetBossActions();
       for (var i = 0; i < balls.length; i++) if (balls[i].active) freeBall(balls[i]);
       for (var j = 0; j < confetti.length; j++) { confetti[j].active = false; confetti[j].m.visible = false; }
       confLive = 0;
@@ -3758,6 +4096,23 @@
     var paperBtn = document.getElementById('ctx-paper');
     var zapBtn = document.getElementById('ctx-zap');
     var pickHint = document.getElementById('pick-hint');
+    var bossBar = document.getElementById('boss-bar');
+    var hintTimer = 0;
+    function flashHint(text) {   // a short note in the pick-hint pill ("The boss is busy")
+      if (pickAttacker) return;
+      pickHint.textContent = text;
+      pickHint.hidden = false;
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(function () { if (!pickAttacker) pickHint.hidden = true; }, 1600);
+    }
+    if (bossBar) bossBar.addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('button[data-act]') : null;
+      if (!btn) return;
+      closeMenu();
+      endPick();
+      var why = bossAction(btn.getAttribute('data-act'));
+      if (why) flashHint(why);
+    });
     var menuUnit = null, pickAttacker = null, pickMode = 'punch', hovered = null;
     var cvs = renderer.domElement;
 
@@ -3937,6 +4292,7 @@
       if (clockTick > 1) { clockTick = 0; updateClock(); }
       updatePatrol();
       updatePantry();
+      updateBossActions(dt);
       if (fights.length) updateFights(dt);
       if (ballsLive) updateBalls(dt);
       if (confLive) updateConfetti(dt);
