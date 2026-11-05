@@ -3,12 +3,14 @@
 //
 // Agents report by writing one JSON file per desk:
 //   <project>/.agent-office/desks/<id>.json   →  { role, status, label, session, updatedAt }
-// Deleting the file removes the desk. This server is read-only: it serves the page
-// and streams the desks; it never writes them.
+// Deleting the file removes the desk. This server never writes desks: it serves the page
+// and streams them. The one thing it writes is <dir>/config.json ({ staleMinutes }), the
+// dashboard's "stale after N min" + "zap = remind the PM" settings, which the PM's stale-desk hook reads.
 //
 //   node server.js [--dir <path>]... [--port <n>] [--host <h>]
 //
 // Routes: GET /  (the page) · GET /api/desks (JSON array) · GET /api/events (SSE "desks")
+//         GET /api/config · POST /api/config ({ "staleMinutes": 0..240, "zapRemindsPm": bool }, same-origin JSON only)
 'use strict';
 
 const http = require('http');
@@ -20,6 +22,7 @@ const DEBOUNCE_MS = 150;
 const POLL_MS = 2000;
 const PING_MS = 25000;
 const PAGE_FILE = path.join(__dirname, 'office-dashboard.html');
+const DEFAULT_STALE_MIN = 15;
 
 function parseArgs(argv) {
   const opts = { dirs: [], port: null, host: '127.0.0.1' };
@@ -49,6 +52,7 @@ function parseArgs(argv) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) { console.error(`Bad port: ${opts.port}`); process.exit(2); }
   opts.port = port;
   opts.deskDirs = opts.dirs.map((d) => path.join(path.resolve(d), 'desks'));
+  opts.configFiles = opts.dirs.map((d) => path.join(path.resolve(d), 'config.json'));
   return opts;
 }
 
@@ -66,6 +70,64 @@ function deskId(name) {
 
 function listDeskFiles(dir) {
   try { return fs.readdirSync(dir).filter((n) => deskId(n)).sort(); } catch (e) { return []; }
+}
+
+// { staleMinutes, zapRemindsPm } from the first --dir that has a readable config.json
+function readConfig(files) {
+  const out = { staleMinutes: DEFAULT_STALE_MIN, zapRemindsPm: true };
+  for (const f of files) {
+    let c;
+    try { c = JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { continue; }   // missing / bad: next
+    const n = Number(c && c.staleMinutes);
+    if (Number.isInteger(n) && n >= 0 && n <= 240) out.staleMinutes = n;
+    if (c && typeof c.zapRemindsPm === 'boolean') out.zapRemindsPm = c.zapRemindsPm;
+    return out;
+  }
+  return out;
+}
+
+// merge into each project's config.json (temp file + rename, so a reader never sees half a file)
+function writeConfig(files, patch) {
+  for (const f of files) {
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')) || {}; } catch (e) {}
+    const tmp = f + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(Object.assign(cur, patch), null, 2) + '\n');
+    fs.renameSync(tmp, f);
+  }
+}
+
+function sendJson(res, code, obj) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+
+// POST /api/config: same-origin JSON only (a page on another site cannot send that without CORS)
+function handleConfigPost(req, res, opts) {
+  const origin = req.headers.origin;
+  if (origin && origin !== `http://${req.headers.host}`) { sendJson(res, 403, { error: 'cross-origin' }); return; }
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) { sendJson(res, 415, { error: 'JSON only' }); return; }
+  let body = '';
+  let tooBig = false;
+  req.on('data', (c) => { body += c; if (body.length > 1024) { tooBig = true; req.destroy(); } });
+  req.on('end', () => {
+    if (tooBig) return;
+    let b;
+    try { b = JSON.parse(body); } catch (e) { b = null; }
+    const patch = {};
+    if (b && b.staleMinutes !== undefined) {
+      const n = Number(b.staleMinutes);
+      if (!Number.isInteger(n) || n < 0 || n > 240) { sendJson(res, 400, { error: 'staleMinutes must be 0..240' }); return; }
+      patch.staleMinutes = n;
+    }
+    if (b && b.zapRemindsPm !== undefined) {
+      if (typeof b.zapRemindsPm !== 'boolean') { sendJson(res, 400, { error: 'zapRemindsPm must be true / false' }); return; }
+      patch.zapRemindsPm = b.zapRemindsPm;
+    }
+    if (!Object.keys(patch).length) { sendJson(res, 400, { error: 'nothing to set' }); return; }
+    try { writeConfig(opts.configFiles, patch); } catch (e) { sendJson(res, 500, { error: e.message }); return; }
+    sendJson(res, 200, readConfig(opts.configFiles));
+  });
 }
 
 function main() {
@@ -160,11 +222,13 @@ function main() {
 
   const server = http.createServer((req, res) => {
     const url = (req.url || '/').split('?')[0];
+    if (url === '/api/config' && req.method === 'POST') { handleConfigPost(req, res, opts); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' });
-      res.end('Method not allowed (read-only)\n');
+      res.end('Method not allowed\n');
       return;
     }
+    if (url === '/api/config') { sendJson(res, 200, readConfig(opts.configFiles)); return; }
     if (url === '/' || url === '/index.html' || url === '/office-dashboard.html') {
       fs.readFile(PAGE_FILE, (err, buf) => {
         if (err) { res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('office-dashboard.html not found\n'); return; }

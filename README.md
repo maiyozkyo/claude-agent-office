@@ -2,7 +2,8 @@
 
 A little chibi office that shows your AI agent team at work — the coordinator session as the boss on a raised loft, and
 the subagents it hands work to (Dev, BA, QC) at their desks below. Characters type, review, get stuck, celebrate, doze
-off when idle, and fake-type when the boss walks by. View it in 3D or 2D.
+off when idle, and fake-type when the boss pops up nearby. Finished agents teleport to the pantry for a coffee (and leave after 10 s when the team is at full
+strength). Everyone teleports — nobody walks. View it in 3D or 2D.
 
 It is **observe-only**: you keep giving work to your agent in the terminal as usual; the page just shows who is doing
 what.
@@ -71,8 +72,15 @@ By hand (local): delete `.agent-office/desks/<label>-*.json`.
   styles, from Cap to Afro to HKT spikes) and hair/shirt colors. Saved in your browser only.
 - **Session picker**: one session's office, or all of them.
 - **3D fun** (purely visual, nothing is written anywhere): right-click (long-press on touch) a character to 👊 punch
-  someone, 👊👊 gang-punch them, or 📄 throw a paper ball. The boss patrols now and then; finished work gets confetti.
+  someone, 👊👊 gang-punch them, or 📄 throw a paper ball. Punchers power up (golden spiky hair, a gold aura), dash in
+  and punch one after another round a ring; the last punch knocks the target flying — it lies 3 s, then teleports
+  home. The boss teleports to patrol now and then or ⚡ zap, then back to the desk; finished work gets confetti.
 - Characters vent censored outbursts (`#@!%`) with a fiery angry face when work is hard.
+- **Stale after N min** (Team drawer, default 15, 0 = off): a working / reviewing / blocked desk with no update for
+  that long fades and the boss ⚡ zaps it; a working desk's pill shows how long it has been working.
+  **⚡ Zap = remind the PM**: in local mode both settings are saved to `<dir>/config.json`
+  (`{ "staleMinutes": 15, "zapRemindsPm": true }`, the one file the server writes) so a Claude Code hook in the
+  project can warn the coordinator session about stale desks; untick it and the zap is only an animation.
 
 ## Privacy
 

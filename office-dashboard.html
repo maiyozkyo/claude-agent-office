@@ -1239,8 +1239,9 @@
     <label class="office-name-field">Office name <input type="text" id="office-name-input" maxlength="40" placeholder="Agent Office"></label>
     <p class="names-hint">"default" sets how many idle desks show for a role before any real work is dispatched (0 hides it). Give each role a list of names, in order — the 1st Dev desk gets the 1st name, and so on. Pick a gender (M/F), a hairstyle, and hair/shirt colors per name. Saved only in this browser.</p>
     <div class="zap-settings">
-      <label class="zap-field">Auto-zap slow workers after <input type="number" id="autozap-min-input" min="0" max="240" step="1" value="10"> min (0 = off)</label>
-      <label class="zap-field"><input type="checkbox" id="zap-sleepers-input" checked> Zap sleepers at random</label>
+      <label class="zap-field">Stale after <input type="number" id="autozap-min-input" min="0" max="240" step="1" value="15"> min without an update (0 = off)</label>
+      <label class="zap-field"><input type="checkbox" id="zap-remind-input" checked> ⚡ Zap = remind the PM</label>
+      <div class="zap-field">Off: the zap is only an animation. On: the PM session gets a warning (local mode).</div>
     </div>
     <div class="names-grid" id="names-grid"></div>
 </aside>
@@ -1259,7 +1260,6 @@
 </script>
 <script>
 (function () {
-  var STALE_MS = 15 * 60 * 1000;
 
   var EXAMPLE_DESKS = [
     { id: 'main-pm', role: 'PM', status: 'reviewing', label: 'reviewing Dev A diff', session: 'main', updatedAt: new Date().toISOString() },
@@ -1729,6 +1729,20 @@
       return new THREE.CanvasTexture(cv);
     })(), transparent: true, depthWrite: false });
     var RAGE_SKIN = new THREE.Color('#ff4a2e');
+    // power-up before a punch: hair turns gold and stands on end, a gold aura flickers round the body
+    var POWER_HAIR = new THREE.Color('#ffd84a');
+    FX.aura = new THREE.SpriteMaterial({ map: (function () {
+      var cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 64;
+      var ctx = cv.getContext('2d');
+      var g = ctx.createRadialGradient(32, 36, 4, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,250,200,0.9)');
+      g.addColorStop(0.45, 'rgba(255,214,70,0.55)');
+      g.addColorStop(1, 'rgba(255,170,20,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(cv);
+    })(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     // taser zap: baton parts, electric arcs, contact glow, sparks, smoke
     FX.taserBand = new THREE.MeshBasicMaterial({ color: 0xffd23a });
     FX.taserTip = new THREE.MeshBasicMaterial({ color: 0xdfe8f5 });
@@ -1966,6 +1980,40 @@
       scene.add(p);
     })();
 
+    // pantry (annex right of the office): counter + coffee machine on the back wall, a round table, 6 spots
+    var PW = 3.6, PANTRY_N = 6;
+    var pantrySpots = [];
+    for (var ps0 = 0; ps0 < PANTRY_N; ps0++) pantrySpots.push({ x: 0, z: 0, face: 0, u: null });
+    room.pantry = new THREE.Group();
+    var pantryMat = {
+      floor: new THREE.MeshLambertMaterial({ color: 0xe9dcc6 }),
+      machine: new THREE.MeshLambertMaterial({ color: 0x3a3f55 }),
+      light: new THREE.MeshBasicMaterial({ color: 0xff6b5a }),
+      coffee: new THREE.MeshBasicMaterial({ color: 0x5a3a22 })
+    };
+    (function () {
+      var g = room.pantry;
+      room.pFloor = box(pantryMat.floor, g);
+      room.pWall = box(roomMat.wall, g);
+      room.pTrim = box(roomMat.woodDark, g);
+      var c = room.pCounter = new THREE.Group(); g.add(c);
+      var cb = box(roomMat.woodDark, c); cb.scale.set(2.4, 0.9, 0.55); cb.position.y = 0.45;
+      var ct = box(roomMat.wood, c); ct.scale.set(2.5, 0.06, 0.62); ct.position.y = 0.93;
+      var mb = box(pantryMat.machine, c); mb.scale.set(0.45, 0.55, 0.4); mb.position.set(-0.6, 1.235, -0.02);
+      var mt = box(pantryMat.machine, c); mt.scale.set(0.5, 0.08, 0.46); mt.position.set(-0.6, 1.55, -0.02);
+      var ml = box(pantryMat.light, c); ml.scale.set(0.06, 0.06, 0.02); ml.position.set(-0.45, 1.4, 0.19);
+      var mc = new THREE.Mesh(G.cyl, roomMat.paper); mc.scale.set(0.12, 0.14, 0.12); mc.position.set(-0.6, 1.03, 0.06); c.add(mc);
+      [0.25, 0.45, 0.65].forEach(function (x) {   // mugs waiting on the counter
+        var m = new THREE.Mesh(G.cyl, roomMat.paper); m.scale.set(0.12, 0.14, 0.12); m.position.set(x, 1.03, 0.08); c.add(m);
+      });
+      var t = room.pTable = new THREE.Group(); g.add(t);
+      var top = new THREE.Mesh(G.cyl, roomMat.wood); top.scale.set(1.0, 0.06, 1.0); top.position.y = 0.78; t.add(top);
+      var leg = new THREE.Mesh(G.cyl, roomMat.woodDark); leg.scale.set(0.1, 0.76, 0.1); leg.position.y = 0.38; t.add(leg);
+      var foot = new THREE.Mesh(G.cyl, roomMat.woodDark); foot.scale.set(0.5, 0.04, 0.5); foot.position.y = 0.02; t.add(foot);
+      var tm = new THREE.Mesh(G.cyl, roomMat.paper); tm.scale.set(0.12, 0.14, 0.12); tm.position.set(0.15, 0.88, 0.1); t.add(tm);
+      scene.add(g);
+    })();
+
     var roomDims = { W: 0, D: 0, LW: 0 };
     function layoutRoom(W, D, LW) {
       if (roomDims.W === W && roomDims.D === D && roomDims.LW === LW) return false;
@@ -2001,6 +2049,22 @@
       room.shelf.position.set(rightSpaceCX, 0, zB + 0.24);
       room.clock.position.set(-W / 2 + 0.03, 2.7, zB + Math.min(D * 0.45, LD + 2.5));
       room.plant.position.set(-W / 2 + 0.5, 0, zB + 0.5);
+      // pantry annex: x from W / 2 to W / 2 + PW
+      var pcx = W / 2 + PW / 2;
+      room.pantry.position.set(pcx, 0, 0);
+      room.pFloor.scale.set(PW, 0.2, D + 0.2); room.pFloor.position.set(0.2, -0.1, 0.1);
+      room.pWall.scale.set(PW, WALL_H + 0.2, 0.2); room.pWall.position.set(0.2, WALL_H / 2 - 0.1, zB - 0.1);
+      room.pTrim.scale.set(PW, 0.18, 0.06); room.pTrim.position.set(0.2, 0.09, zB + 0.03);
+      room.pCounter.position.set(0.2, 0, zB + 0.3);
+      var tz = zB + Math.max(2.3, D * 0.5);
+      room.pTable.position.set(0, 0, tz);
+      for (var si = 0; si < PANTRY_N; si++) {   // a ring round the table, each facing it
+        var sa = si / PANTRY_N * PI * 2 + PI + 0.3;   // the first spot behind the table, facing the camera
+        var sp = pantrySpots[si];
+        sp.x = pcx + Math.sin(sa) * 0.95; sp.z = tz + Math.cos(sa) * 0.95;
+        sp.face = Math.atan2(pcx - sp.x, tz - sp.z);
+      }
+      target.x = PW / 2;   // frame the office + pantry together
       return true;
     }
 
@@ -2030,6 +2094,7 @@
       hemi.groundColor.set(theme.dark ? '#2a2f48' : '#9aa3c4');
       hemi.intensity = theme.dark ? 0.75 : 0.85;
       sun.intensity = theme.dark ? 0.5 : 0.6;
+      pantryMat.floor.color.set(theme.dark ? '#4b4458' : '#e9dcc6');
     }
 
     // ---- desks ----
@@ -2091,7 +2156,8 @@
       var plateBack = mesh(G.box, m.ink, root); plateBack.scale.set(0.5, 0.17, 0.02); plateBack.position.set(0, DESK_Y + 0.1, 0.885); plateBack.rotation.x = -0.3;
 
       // ---- chibi ----
-      var body = new THREE.Group(); body.position.y = SIT_HIP; root.add(body);
+      var body = new THREE.Group(); body.position.y = SIT_HIP; body.rotation.order = 'YXZ'; root.add(body);
+      var aura = new THREE.Sprite(FX.aura); aura.position.y = 0.45; aura.visible = false; body.add(aura);
       var legL = new THREE.Group(); legL.position.set(-0.11, 0, 0.02); body.add(legL);
       var legR = new THREE.Group(); legR.position.set(0.11, 0, 0.02); body.add(legR);
       [legL, legR].forEach(function (lg) {
@@ -2276,6 +2342,11 @@
         taserTip = new THREE.Object3D(); taserTip.position.y = -0.25; taser.add(taserTip);
       }
 
+      // coffee mug: hidden in the right hand, shown only on a pantry break
+      var cup = new THREE.Group(); cup.position.y = -0.42; cup.rotation.x = 1.1; cup.visible = false; armR.add(cup);
+      var cupB = new THREE.Mesh(G.cyl, roomMat.paper); cupB.scale.set(0.13, 0.15, 0.13); cup.add(cupB);
+      var cupT = new THREE.Mesh(G.cyl, pantryMat.coffee); cupT.scale.set(0.105, 0.01, 0.105); cupT.position.y = 0.071; cup.add(cupT);
+
       var exclMat = new THREE.SpriteMaterial({ map: exclTex, transparent: true, depthTest: false });
       fadeMats.push({ m: exclMat, base: 1 });
       var excl = new THREE.Sprite(exclMat);
@@ -2334,7 +2405,11 @@
         baseText: '', baseCls: 'bubble', overText: '',
         // taser zap: hair group, flashing materials, the boss's baton
         hairGrp: hg, zapMats: [m.headSkin, m.skin, m.shirt], zapGlowHex: 0, zapBy: null,
-        taser: taser, taserTip: taserTip
+        taser: taser, taserTip: taserTip,
+        cup: cup, doneAt: -9,
+        // punch power-up + being beaten up
+        aura: aura, power: 0, hairMats: [m.hair, m.hairDark], hairBase: [m.hair.color.clone(), m.hairDark.color.clone()],
+        beatBy: null, beatFace: 0
       };
       body.userData.unit = u;
       setFace(u, 'normal');
@@ -2342,6 +2417,8 @@
     }
 
     function disposeUnit(u) {
+      var bf = u.fight;   // hidden while on a coffee break: vanish in a puff
+      if (bf && bf.pantry && bf.phase === 'coffee') poofAt(bf.pos.x, bf.gy, bf.pos.z);
       u.dead = true;
       cancelFightsFor(u);
       if (hovered === u) hovered = null;
@@ -2428,6 +2505,7 @@
     function updateUnit(u, it) {
       var st = it.status || 'idle';
       if (st !== u.status) wake(u);
+      if (st === 'done' && u.status !== 'done') u.doneAt = T;
       u.status = st;
       u.outburstOn = !!it.outburst;
       setFade(u, it.stale ? 0.4 : (it.placeholder ? 0.75 : 1));
@@ -2440,7 +2518,7 @@
       applyBubble(u);
       var nm = it.name || '';
       if (u.nameTag.textContent !== nm) u.nameTag.textContent = nm;
-      var pt = it.placeholder ? 'no work yet' : (it.stale ? 'stale' : (it.status || 'idle'));
+      var pt = pillLabel(it);
       if (u.pillText.textContent !== pt) u.pillText.textContent = pt;
     }
 
@@ -2498,7 +2576,7 @@
 
     function fits(cam) {
       var W = roomDims.W, D = roomDims.D;
-      var xs = [-W / 2 - 0.2, W / 2 + 0.2], ys = [-0.2, WALL_H + 0.4], zs = [-D / 2 - 0.2, D / 2 + 0.3];
+      var xs = [-W / 2 - 0.2, W / 2 + PW + 0.2], ys = [-0.2, WALL_H + 0.4], zs = [-D / 2 - 0.2, D / 2 + 0.3];
       for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) for (var k = 0; k < 2; k++) {
         tmpV.set(xs[i], ys[j], zs[k]).project(cam);
         if (tmpV.z > 1 || Math.abs(tmpV.x) > 0.95 || Math.abs(tmpV.y) > 0.93) return false;
@@ -2598,7 +2676,7 @@
       var annoyed = u.annoyedUntil > T && !u.fight;  // just hit by a paper ball
       // dozing: any idle desk (real or placeholder) with nothing else going on falls asleep almost at once
       var zapped = !!u.zapBy;                         // a taser zap is running through this one
-      var quiet = u.status === 'idle' && !u.fight && !faking && !clapping && !annoyed && !zapped &&
+      var quiet = u.status === 'idle' && !u.fight && !u.beatBy && !faking && !clapping && !annoyed && !zapped &&
         T >= (u.hitUntil || -1) + 0.7 && T - u.throwAt >= 0.55;
       if (quiet) {
         u.idleT += dt;
@@ -2672,34 +2750,74 @@
         headY = 0; headX = 0;
         if (u.rubUntil > T) { rX = -2.75; rZ = -0.55 + Math.sin(t * 22) * 0.18; }
       }
-      // a punch fight overrides the status pose: walk there, jab, walk back
+      // a fight / patrol / coffee break overrides the status pose: teleport there, act, teleport back
       var f = u.fight;
       if (f && f.phase === 'wait') f = null;   // gang punch: still seated until the staggered start
-      var walk = 0, lunge = 0;
+      var lunge = 0, tilt = 0, lying = false;
       if (f) {
         lX = -0.3; rX = -0.3; lZ = 0.08; rZ = 0.08; headY = 0; headZ = 0; bob = 0; xOff = 0; exclOn = false;
         stand = f.phase === 'sit' ? 0 : 1;
         rotY = f.phase === 'sit' ? 0 : f.face;
-        if (f.phase === 'out' || f.phase === 'back') {
-          walk = 1;
-          var sw = Math.sin(f.wc);
-          lX = sw * 0.6; rX = -sw * 0.6;
-          bob = Math.abs(Math.cos(f.wc)) * 0.05;
-        } else if (f.phase === 'punch') {
-          var js = Math.sin(f.t * 14);
-          lX = -0.35 - 1.3 * Math.max(js, 0);
-          rX = -0.35 - 1.3 * Math.max(-js, 0);
-          lZ = rZ = -0.05;
-          lunge = Math.abs(js) * 0.09;
-          bob = Math.abs(js) * 0.02;
+        if (f.phase === 'charge') {   // powering up: fists clenched at the sides, trembling, chin up
+          lX = rX = -0.35 + Math.sin(t * 70) * 0.06; lZ = rZ = 0.45;
+          bob = Math.random() * 0.03;
+          headX = -0.12;
+        } else if (f.phase === 'dash') {   // charging in: leaning forward, arms swept back
+          lX = rX = 0.9; lZ = rZ = 0.15;
+          tilt = 0.45;
+        } else if (f.phase === 'ready') {  // boxer stance, bouncing, waiting for a turn
+          lX = rX = -1.4; lZ = rZ = -0.25;
+          bob = Math.abs(Math.sin(t * 8)) * 0.03;
+        } else if (f.phase === 'punch') {  // one big straight right
+          var pk = f.t < HIT_AT ? f.t / HIT_AT : Math.max(0, 1 - (f.t - HIT_AT) / 0.3);
+          rX = -1.4 - 0.2 * pk; rZ = 0.05;
+          lX = -1.4; lZ = -0.25;
+          lunge = pk * 0.25;
+          tilt = pk * 0.2;
+        } else if (f.ko && f.phase === 'fly') {   // knocked flying: tumbling, arms everywhere
+          lX = rX = -2.8; lZ = rZ = 0.9 + Math.sin(t * 30) * 0.3;
+          tilt = -Math.min(1, f.t / KO_FLY) * 2.5 * PI;
+        } else if (f.ko && (f.phase === 'lie' || f.phase === 'tpOut')) {   // flat on the back, seeing stars
+          lX = rX = -0.2; lZ = rZ = 1.3;
+          tilt = -PI / 2;
+          lying = true;
         } else if (f.phase === 'zap') {   // baton held out at the target, a little buzz in the wrist
           rX = -1.45 + Math.sin(f.t * 40) * 0.04; rZ = 0.12;
           lX = -0.2; lZ = 0.18;
           lunge = 0.05;
+        } else if (f.phase === 'look') {   // boss patrol stop: hands on hips, head sweeping the room
+          lX = rX = -0.25; lZ = rZ = 0.55;
+          headY = Math.sin(f.t * 2.6) * 0.6;
+        } else if (f.phase === 'coffee') {   // pantry: cup held in front, a slow sip every few seconds
+          var sip = (f.t + u.phase) % 3.2;
+          var sk = sip < 0.5 ? smooth01(sip / 0.5) : (sip < 1.3 ? 1 : (sip < 1.8 ? 1 - smooth01((sip - 1.3) / 0.5) : 0));
+          rX = -0.95 - 1.25 * sk; rZ = 0.1 + 0.3 * sk;
+          lX = -0.3; lZ = 0.12;
+          headX = -0.12 * sk;
+          headY = sk ? 0 : Math.sin((f.t + u.phase) * 0.7) * 0.35;
+          bob = Math.sin((f.t + u.phase) * 2) * 0.01;
         }
       }
+      var sipping = !!(f && f.phase === 'coffee');
+      if (u.cup && sipping !== u.cup.visible) u.cup.visible = sipping;
       if (zapped && !f) {   // being zapped: arms flung out stiff, head straight
         lX = rX = -0.55; lZ = rZ = 0.75; headX = 0; headY = 0; exclOn = false;
+      }
+      if (u.beatBy && !f) {   // being beaten up: on its feet, guard up, turned to the current puncher
+        stand = 1; xOff = 0; rotY = u.beatFace; headX = 0; headY = 0; exclOn = false;
+        lX = rX = -1.9; lZ = rZ = -0.35;
+      }
+      var pwT = f && f.g && (f.phase === 'charge' || f.phase === 'dash' || f.phase === 'ready' || f.phase === 'punch') ? 1 : 0;
+      if (pwT || u.power) {
+        u.power += (pwT - u.power) * (1 - Math.exp(-dt * (pwT ? 4 : 3)));
+        if (!pwT && u.power < 0.003) u.power = 0;
+        for (var hm = 0; hm < u.hairMats.length; hm++) u.hairMats[hm].color.copy(u.hairBase[hm]).lerp(POWER_HAIR, u.power);
+        var auraOn = u.power > 0.05;
+        if (auraOn !== u.aura.visible) u.aura.visible = auraOn;
+        if (auraOn) {
+          var ap = u.power * (1 + Math.sin(t * 24) * 0.08 + Math.random() * 0.05);
+          u.aura.scale.set(1.35 * ap, 1.9 * ap, 1);
+        }
       }
       var zapping = !!(f && f.zap && f.phase !== 'sit');
       var sinceStartle = T - u.startleAt;
@@ -2724,7 +2842,7 @@
       P.rotY += dr * (1 - Math.exp(-dt * 10));
 
       // rage blend (outburst or attacking): red skin, flames, head shake
-      var rageT = ((u.outburstOn && !zapping) || (f && f.phase !== 'sit' && !f.patrol && !f.zap)) ? 1 : 0;
+      var rageT = (u.outburstOn && !zapping) ? 1 : 0;
       u.rage += (rageT - u.rage) * (1 - Math.exp(-dt * 10));
       if (Math.abs(u.rage - (u.rageApplied || 0)) > 0.004) {
         u.rageApplied = u.rage;
@@ -2732,8 +2850,8 @@
       }
       var dizzy = T < (u.hitUntil || -1) + 0.7;
       setFace(u, zapped ? 'zapped' : (dizzy ? 'dizzy' : (zapping ? 'smug' :
-        (u.rage > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')))));
-      setOverText(u, annoyed ? '?!' : (f && f.zap && f.phase === 'zap' ? f.say : ''));
+        (u.rage > 0.5 || u.power > 0.5 || annoyed ? 'rage' : (u.dozing ? 'sleep' : 'normal')))));
+      setOverText(u, annoyed ? '?!' : (f && f.zap && f.phase === 'zap' ? f.say : (f && f.g && f.phase === 'charge' ? 'HAAA!' : '')));
       if (u.dozing !== u.zzz.visible) u.zzz.visible = u.dozing;
       if (u.dozing) {
         for (var zk = 0; zk < 3; zk++) {
@@ -2764,7 +2882,7 @@
       var rec = u.hitAmt || 0;
       if (rec > 0.0005) u.hitAmt = rec * Math.exp(-dt * 10);
 
-      var hipY = SIT_HIP + (STAND_HIP - SIT_HIP) * P.stand + P.bob;
+      var hipY = lying ? 0.22 : SIT_HIP + (STAND_HIP - SIT_HIP) * P.stand + P.bob;
       if (f) {
         var rp = u.root.position;
         u.body.position.set(
@@ -2775,6 +2893,18 @@
         u.body.position.set(P.xOff + u.hitDX * rec, hipY, P.stand * 0.06 + u.hitDZ * rec);
       }
       u.body.rotation.y = P.rotY;
+      u.body.rotation.x = tilt;
+      // teleport: squash thin + stretch tall on the way out, the reverse on the way in
+      var tps = 1;
+      if (f && (f.phase === 'tpOut' || f.phase === 'tpIn')) {
+        var tpk = Math.min(1, f.t / TP_T);
+        tps = f.phase === 'tpOut' ? 1 - tpk : tpk;
+      }
+      if (tps !== u.tpS) {
+        u.tpS = tps;
+        var tpw = Math.max(0.001, tps * tps);
+        u.body.scale.set(tpw, 1 + (1 - tps) * 0.9, tpw);
+      }
       if (zapped) {   // electrocuted: the whole body rattles, skin strobes white / blue, hair stands up
         var ja = REDUCE_MOTION ? 0.25 : 1;
         u.body.position.x += (Math.random() - 0.5) * 0.07 * ja;
@@ -2788,29 +2918,27 @@
         if (u.zapGlowHex) setZapGlow(u, 0);
       }
       var hgs = u.hairGrp.scale.y;
-      if (zapped || hgs !== 1) {
-        var hgT = zapped ? 1.6 + Math.random() * 0.15 * (REDUCE_MOTION ? 0 : 1) : 1;
+      if (zapped || hgs !== 1 || u.power) {
+        var hgT = zapped ? 1.6 + Math.random() * 0.15 * (REDUCE_MOTION ? 0 : 1) : 1 + 0.55 * u.power;
         hgs += (hgT - hgs) * (1 - Math.exp(-dt * (zapped ? 25 : 2.5)));
         if (!zapped && Math.abs(hgs - 1) < 0.01) hgs = 1;
         u.hairGrp.scale.set(1 + (hgs - 1) * 0.2, hgs, 1 + (hgs - 1) * 0.2);
       }
       var legRot = -PI / 2 * (1 - P.stand);
-      var swing = walk ? Math.sin(f.wc) * 0.6 : 0;
-      u.legL.rotation.x = legRot + swing; u.legR.rotation.x = legRot - swing;
+      u.legL.rotation.x = legRot; u.legR.rotation.x = legRot;
       u.headGrp.rotation.x = P.headX;
       u.headGrp.rotation.y = P.headY;
-      // swinging hair: a gentle sway, bigger while walking
+      // swinging hair: a gentle sway
       if (u.tail || u.braids) {
-        var stride = walk ? Math.sin(f.wc) : 0;
-        var sway = Math.sin(t * 2.2) * 0.08 + stride * 0.35 - P.headZ * 0.8;
+        var sway = Math.sin(t * 2.2) * 0.08 - P.headZ * 0.8;
         if (u.tail) {
           u.tail.rotation.z = sway;
-          u.tail.rotation.x = walk ? 0.3 + Math.abs(stride) * 0.25 : P.bob * 3;
+          u.tail.rotation.x = P.bob * 3;
         }
         if (u.braids) {
           u.braids[0].rotation.z = sway * 0.6;
           u.braids[1].rotation.z = sway * 0.6;
-          u.braids[0].rotation.x = u.braids[1].rotation.x = walk ? 0.2 + Math.abs(stride) * 0.15 : 0;
+          u.braids[0].rotation.x = u.braids[1].rotation.x = 0;
         }
       }
       u.headGrp.rotation.z = P.headZ + Math.sin(t * 45) * shake + u.hitDX * rec * 3;
@@ -2827,7 +2955,6 @@
     /* ---- punch fights (purely visual, never written anywhere) ---- */
     var fights = [];
     var POWS = ['POW!', 'BAM!', 'WHAM!', 'BONK!'];
-    var WALK_SPEED = 2.6;
 
     function groundAt(x, z) {
       var zB = -roomDims.D / 2, LW = roomDims.LW;
@@ -2842,57 +2969,101 @@
       return 0;
     }
 
-    // seat → beside own desk → aisle (or loft stairs) → aisle by the target → beside the target
+    // seat and the spot beside the target: everyone teleports between the two
     function computePath(f) {
-      if (f.patrol) return;   // the boss's stroll uses a fixed route
-      var a = f.att.root.position, b = f.tgtPos, P = f.path, n = 0;
-      var zB = -roomDims.D / 2, LW = roomDims.LW, zS = zB + LD - 0.5;
-      var stairTop = LW / 2 - 0.35, stairBot = LW / 2 + 1.85;
-      function add(x, z) { P[n++].set(x, 0, z); }
-      add(a.x, a.z);
-      add(a.x + f.sideA, a.z + 0.05);
-      var aL = a.y > 0.5, bL = b.y > 0.5;
-      // gang punch: each attacker has its own slot on a ring around the target (sides + back)
-      var ring = f.slotX != null;
-      var ex = ring ? f.slotX : f.sideT * 0.75, ez = ring ? f.slotZ : 0.02;
-      var ax = ring ? f.slotX : f.sideT * 0.8;
-      if (aL && bL) {
-        add(a.x + f.sideA, zB + 0.35);
-        add(b.x + ax, zB + 0.35);
-      } else {
-        if (aL) { add(stairTop, zS); add(stairBot, zS); } else add(a.x + f.sideA, a.z - 0.85);
-        if (bL) { add(stairBot, zS); add(stairTop, zS); } else add(b.x + ax, b.z - (ring ? Math.max(0.85, -f.slotZ + 0.3) : 0.85));
-      }
-      add(b.x + ex, b.z + ez);
-      f.n = n;
-      if (f.idx > n - 1) f.idx = n - 1;
+      if (f.patrol) return;   // fixed stops
+      var a = f.att.root.position, b = f.tgtPos;
+      if (f.ko) { f.path[0].set(a.x, 0, a.z); return; }
+      if (f.pantry) { f.path[0].set(a.x, 0, a.z); f.path[1].set(f.spot.x, 0, f.spot.z); return; }
+      var ring = f.slotX != null;          // gang punch: each attacker has its own slot on a ring (sides + back)
+      f.path[0].set(a.x, 0, a.z);
+      f.path[1].set(b.x + (ring ? f.slotX : f.sideT * 0.75), 0, b.z + (ring ? f.slotZ : 0.02));
     }
 
     function startFight(att, tgt, gang) {
-      if (!att || !tgt || att === tgt || att.fight || tgt.fight || att.dead || tgt.dead) return null;
+      if (!att || !tgt || att === tgt || att.fight || att.beatBy || tgt.fight || att.dead || tgt.dead) return null;
       var a = att.root.position, b = tgt.root.position;
       var dx = b.x - a.x;
       var sideA = dx < -0.01 ? -1 : 1;
       var sideT = Math.abs(dx) > 0.01 ? -sideA : sideA;
-      var path = [];
-      for (var i = 0; i < 8; i++) path.push(new THREE.Vector3());
       var f = {
-        att: att, tgt: tgt, phase: 'stand', t: 0, idx: 0, n: 0, path: path,
+        att: att, tgt: tgt, phase: 'stand', t: 0, n: 2, path: [new THREE.Vector3(), new THREE.Vector3()],
         pos: new THREE.Vector3(a.x + att.p.xOff, a.y, a.z), tgtPos: b.clone(), gy: a.y,
-        face: 0, wc: 0, sideA: sideA, sideT: sideT, pow: null, powT: 0, powI: 0,
-        slotX: null, slotZ: 0, delay: 0, punchDur: 3, powX: 0.3, powY: 0
+        face: 0, sideT: sideT, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 3, powX: 0.3, powY: 0,
+        tpIdx: 0, g: null, hit: false
       };
       if (gang) {
         f.phase = 'wait';
         f.delay = gang.delay;
         f.slotX = gang.slotX; f.slotZ = gang.slotZ;
-        f.punchDur = gang.punchDur;
         f.powX = gang.powX; f.powY = gang.powY;
-        f.powT = gang.powT;
       }
       att.fight = f;
       fights.push(f);
       return f;
+    }
+
+    /* ---- a beating (single punch or gang): every attacker powers up at the desk, dashes in to its slot,
+       then they punch one after another round the ring (the target turning to each); the last punch
+       knocks the target flying, the attackers teleport home, the target lies 3 s and teleports home ---- */
+    var CHARGE_T = 1.2, DASH_T = 0.3, PUNCH_T = 0.5, HIT_AT = 0.12;
+    var KO_FLY = 0.75, KO_LIE = 3, KO_DIST = 2.6;
+    function newBeating(tgt) { return { tgt: tgt, members: [], turn: 0, launched: false, done: false }; }
+    function joinBeating(g, f) { f.g = g; g.members.push(f); g.tgt.beatBy = g; wake(g.tgt); }
+    function startPunch(att, tgt) {
+      if (!tgt || tgt.beatBy) return null;
+      var f = startFight(att, tgt);
+      if (f) joinBeating(newBeating(tgt), f);
+      return f;
+    }
+    function showPow(f, text) {
+      if (!f.pow) {
+        f.pow = document.createElement('div');
+        f.pow.className = 'pow';
+        f.pow.style.zIndex = 20000;
+        labelsLayer.appendChild(f.pow);
+      }
+      var sp = document.createElement('span');
+      sp.textContent = text;
+      f.pow.textContent = '';
+      f.pow.appendChild(sp);
+    }
+    function faceOf(from, to) { return Math.atan2(to.x - from.x, to.z - from.z); }
+    function impact(f) {
+      var g = f.g, tg = f.tgt, tp = tg.root.position;
+      var hx = tp.x - f.pos.x, hz = tp.z - f.pos.z, hd = Math.sqrt(hx * hx + hz * hz) || 1;
+      var last = g.turn >= g.members.length - 1;
+      showPow(f, last ? 'K.O.!' : POWS[g.turn % POWS.length]);
+      if (last) {
+        g.launched = true;
+        tg.beatBy = null;
+        startKO(tg, hx / hd, hz / hd);
+      } else {
+        tg.hitDX = hx / hd; tg.hitDZ = hz / hd;
+        tg.hitAmt = 0.22;
+        tg.hitUntil = T;
+        tg.beatFace = faceOf(tp, g.members[g.turn + 1].pos);
+      }
+    }
+    function startKO(t, dx, dz) {
+      if (t.fight || t.dead) { t.hitAmt = 0.3; t.hitUntil = T; return; }
+      var a = t.root.position, W = roomDims.W, D = roomDims.D, zB = -D / 2;
+      var lx = Math.max(-W / 2 + 0.5, Math.min(W / 2 + PW - 0.5, a.x + dx * KO_DIST));
+      var lz = Math.max(zB + 0.5, Math.min(D / 2 - 0.4, a.z + dz * KO_DIST));
+      var f = {
+        att: t, tgt: null, ko: true, phase: 'fly', t: 0, n: 2, tpIdx: 0,
+        path: [new THREE.Vector3(a.x, 0, a.z), new THREE.Vector3(lx, 0, lz)],
+        pos: new THREE.Vector3(a.x + t.p.xOff, a.y, a.z), tgtPos: a.clone(), gy: a.y, arcY: 0,
+        fx: a.x + t.p.xOff, fz: a.z, fy: a.y,
+        face: Math.atan2(-dx, -dz), sideT: 1, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 0, powX: 0, powY: 0
+      };
+      t.hitAmt = 0;
+      t.hitUntil = T + KO_FLY + KO_LIE;
+      wake(t);
+      t.fight = f;
+      fights.push(f);
     }
 
     // "Đánh hội đồng": everyone else (closest 8, nobody already fighting) mobs the target
@@ -2901,12 +3072,12 @@
       var a = [];
       for (var i = 0; i < unitList.length; i++) {
         var u = unitList[i];
-        if (u !== tgt && !u.dead && !u.fight && !u.zapBy) a.push(u);
+        if (u !== tgt && !u.dead && !u.fight && !u.zapBy && !u.beatBy) a.push(u);
       }
       return a;
     }
     function startGang(tgt) {
-      if (!tgt || tgt.dead || tgt.fight) return 0;
+      if (!tgt || tgt.dead || tgt.fight || tgt.beatBy) return 0;
       var b = tgt.root.position;
       var list = gangCandidates(tgt).map(function (u) {
         var p = u.root.position;
@@ -2928,17 +3099,17 @@
         var ay = y.ang < -PI / 2 ? y.ang + 2 * PI : y.ang;
         return ax - ay;
       });
-      list.forEach(function (it, k) {
+      var g = newBeating(tgt);
+      list.forEach(function (it, k) {   // members in ring order: the punches go round the ring
         var ang = n === 1 ? PI / 2 : a0 + (a1 - a0) * k / (n - 1);
-        startFight(it.u, tgt, {
+        var f = startFight(it.u, tgt, {
           delay: Math.random() * 0.4,
           slotX: Math.cos(ang) * R,
           slotZ: Math.min(0.15, -Math.sin(ang) * R),
-          punchDur: 2.6 + Math.random() * 0.8,
           powX: (Math.random() - 0.5) * 0.9,
-          powY: (Math.random() - 0.3) * 0.35,
-          powT: Math.random() * 0.45
+          powY: (Math.random() - 0.3) * 0.35
         });
+        if (f) joinBeating(g, f);
       });
       return n;
     }
@@ -2953,6 +3124,12 @@
       removePow(f);
       stopZapFx(f);
       if (zapFight === f) zapFight = null;
+      if (f.pantry && f.spot.u === f.att) f.spot.u = null;
+      if (f.g) {
+        var g = f.g, gi = g.members.indexOf(f);
+        if (gi >= 0) { g.members.splice(gi, 1); if (gi < g.turn) g.turn--; }
+        if (!g.members.length && g.tgt.beatBy === g) g.tgt.beatBy = null;
+      }
       if (f.att.fight === f) {
         f.att.fight = null;
         f.att.p.xOff = 0;
@@ -2962,10 +3139,11 @@
       removePow(f);
       stopZapFx(f);
       if (f.phase === 'wait') { endFight(f); return; }   // never got up
-      if (f.phase === 'out') { f.phase = 'back'; f.idx = Math.max(0, f.idx - 1); }
-      else if (f.phase === 'punch' || f.phase === 'zap') { f.phase = 'back'; f.idx = Math.max(0, f.n - 2); }
-      else if (f.phase === 'stand') { f.phase = 'sit'; }
-      f.t = 0;
+      if (f.phase === 'stand' || f.phase === 'charge') { f.phase = 'sit'; f.t = 0; return; }
+      if (f.phase === 'sit' || (f.tpIdx === 0 && (f.phase === 'tpOut' || f.phase === 'tpIn'))) return;   // home / on the way
+      if (f.phase === 'tpIn') { f.phase = 'tpOut'; f.t = Math.max(0, TP_T - f.t); }   // blink straight back out
+      else if (f.phase !== 'tpOut') { f.phase = 'tpOut'; f.t = 0; }
+      f.tpIdx = 0;
     }
     // a desk rebuilt / removed mid-fight: drop the fight cleanly
     function cancelFightsFor(u) {
@@ -2974,17 +3152,6 @@
         if (f.att === u) endFight(f);
         else if (f.tgt === u) { f.tgt = null; goBack(f); }
       }
-    }
-
-    function walkToward(f, goal, dt) {
-      var dx = goal.x - f.pos.x, dz = goal.z - f.pos.z;
-      var d = Math.sqrt(dx * dx + dz * dz);
-      var step = (f.speed || WALK_SPEED) * dt;
-      if (d > 0.001) f.face = Math.atan2(dx, dz);
-      if (d <= step) { f.pos.x = goal.x; f.pos.z = goal.z; f.wc += d * 7; return true; }
-      f.pos.x += dx / d * step; f.pos.z += dz / d * step;
-      f.wc += step * 7;
-      return false;
     }
 
     function updateFights(dt) {
@@ -3001,47 +3168,80 @@
         if (f.phase === 'stand') {
           f.pos.x += (f.path[0].x - f.pos.x) * Math.min(1, dt * 8);
           f.pos.z += (f.path[0].z - f.pos.z) * Math.min(1, dt * 8);
-          if (f.t > 0.4) { f.phase = 'out'; f.idx = 1; f.t = 0; }
-        } else if (f.phase === 'out') {
-          if (walkToward(f, f.path[f.idx], dt)) {
-            if (f.idx >= f.n - 1) {
-              if (f.patrol) { f.phase = 'sit'; f.t = 0; }   // the route ends back at the seat
-              else if (f.tgt) { f.phase = f.zap ? 'zap' : 'punch'; f.t = 0; } else goBack(f);
-            } else f.idx++;
+          if (f.t > 0.4) {
+            if (f.g) { f.phase = 'charge'; if (f.tgt) f.face = faceOf(f.pos, f.tgt.root.position); }
+            else { f.phase = 'tpOut'; f.tpIdx = 1; }
+            f.t = 0;
           }
-        } else if (f.phase === 'back') {
-          if (walkToward(f, f.path[f.idx], dt)) {
-            if (f.idx <= 0) { f.phase = 'sit'; f.t = 0; } else f.idx--;
+        } else if (f.phase === 'charge') {
+          if (!f.tgt) goBack(f);
+          else if (f.t > CHARGE_T) { f.phase = 'dash'; f.t = 0; f.fx = f.pos.x; f.fz = f.pos.z; }
+        } else if (f.phase === 'dash') {
+          var dk = Math.min(1, f.t / DASH_T), de = dk * (2 - dk);
+          f.pos.x = f.fx + (f.path[1].x - f.fx) * de;
+          f.pos.z = f.fz + (f.path[1].z - f.fz) * de;
+          if (f.tgt) f.face = faceOf(f.pos, f.tgt.root.position);
+          if (dk >= 1) { f.phase = 'ready'; f.t = 0; }
+        } else if (f.phase === 'ready') {
+          var gr = f.g;
+          f.pos.x = f.path[1].x; f.pos.z = f.path[1].z;
+          if (!f.tgt || gr.done) goBack(f);
+          else if (!gr.launched) {
+            f.face = faceOf(f.pos, f.tgt.root.position);
+            var all = true;
+            for (var gm = 0; gm < gr.members.length; gm++) {
+              var ph = gr.members[gm].phase;
+              if (ph !== 'ready' && ph !== 'punch') { all = false; break; }
+            }
+            if (all && gr.members[gr.turn] === f) {
+              f.phase = 'punch'; f.t = 0; f.hit = false;
+              f.tgt.beatFace = faceOf(f.tgt.root.position, f.pos);
+            }
           }
+        } else if (f.phase === 'fly') {   // knocked out: an arc to the landing spot
+          var fk = Math.min(1, f.t / KO_FLY);
+          f.pos.x = f.fx + (f.path[1].x - f.fx) * fk;
+          f.pos.z = f.fz + (f.path[1].z - f.fz) * fk;
+          f.gy = f.fy + (groundAt(f.path[1].x, f.path[1].z) - f.fy) * fk;
+          f.arcY = Math.sin(fk * PI) * 1.3;
+          if (fk >= 1) { f.arcY = 0; f.phase = 'lie'; f.t = 0; poofAt(f.pos.x, f.gy - 0.2, f.pos.z); }
+        } else if (f.phase === 'lie') {
+          if (f.t > KO_LIE) { f.phase = 'tpOut'; f.tpIdx = 0; f.t = 0; }
+        } else if (f.phase === 'tpOut') {   // shrinking away; at the end, pop to the next spot
+          if (f.t >= TP_T) {
+            var to = f.path[f.tpIdx];
+            poofAt(f.pos.x, f.gy, f.pos.z);
+            f.pos.x = to.x; f.pos.z = to.z;
+            f.gy = groundAt(to.x, to.z);
+            poofAt(to.x, f.gy, to.z);
+            if (f.tgt) { var tq = f.tgt.root.position; f.face = Math.atan2(tq.x - to.x, tq.z - to.z); }
+            else if (f.tpIdx === 0) f.face = 0;
+            else if (f.pantry) f.face = f.spot.face;
+            f.phase = 'tpIn'; f.t = 0;
+          }
+        } else if (f.phase === 'tpIn') {    // growing back in place
+          if (f.t >= TP_T) {
+            if (f.tpIdx === 0) { f.phase = 'sit'; f.t = 0; }
+            else if (f.patrol) { f.phase = 'look'; f.t = 0; }
+            else if (f.pantry) { f.phase = 'coffee'; f.t = 0; }
+            else if (f.tgt && f.zap) { f.phase = 'zap'; f.t = 0; }
+            else goBack(f);
+          }
+        } else if (f.phase === 'coffee') {   // until the desk is no longer done (or hidden by the page)
+          f.pos.x = f.path[1].x; f.pos.z = f.path[1].z; f.face = f.spot.face;
+          if (f.att.status !== 'done') goBack(f);
+        } else if (f.phase === 'look') {    // patrol stop: glare around, then the next spot (or home)
+          f.face += Math.sin(f.t * 2.2) * dt * 1.6;
+          if (f.t > TP_LOOK) { f.tpIdx = f.tpIdx + 1 < f.n ? f.tpIdx + 1 : 0; f.phase = 'tpOut'; f.t = 0; }
         } else if (f.phase === 'punch') {
-          if (!f.tgt) { goBack(f); }
+          if (!f.tgt) goBack(f);
           else {
-            var tg = f.tgt, tp = tg.root.position;
-            var hx = tp.x + tg.p.xOff - f.pos.x, hz = tp.z - f.pos.z;
-            var hd = Math.sqrt(hx * hx + hz * hz) || 1;
-            f.face = Math.atan2(hx, hz);
-            var js = Math.abs(Math.sin(f.t * 14));
-            tg.hitUntil = T;
-            wake(tg);
-            tg.hitDX = hx / hd; tg.hitDZ = hz / hd;
-            tg.hitAmt = Math.max(tg.hitAmt || 0, js * 0.09);
-            if (!f.pow) {
-              f.pow = document.createElement('div');
-              f.pow.className = 'pow';
-              f.pow.style.zIndex = 20000;
-              labelsLayer.appendChild(f.pow);
-              if (f.slotX == null) f.powT = 1;   // gang: keep the random head start so pops stagger
+            if (!f.g.launched) f.face = faceOf(f.pos, f.tgt.root.position);
+            if (!f.hit && f.t >= HIT_AT) { f.hit = true; impact(f); }
+            if (f.t > PUNCH_T) {
+              if (f.g.launched) { f.g.done = true; goBack(f); }
+              else { f.g.turn++; f.phase = 'ready'; f.t = 0; removePow(f); }
             }
-            f.powT += dt;
-            if (f.powT > 0.45) {
-              f.powT = 0;
-              f.powI++;
-              var sp = document.createElement('span');
-              sp.textContent = POWS[f.powI % POWS.length];
-              f.pow.textContent = '';
-              f.pow.appendChild(sp);
-            }
-            if (f.t > f.punchDur) goBack(f);
           }
         } else if (f.phase === 'zap') {
           if (!f.tgt) { goBack(f); }
@@ -3072,36 +3272,92 @@
           f.pos.x = f.path[0].x; f.pos.z = f.path[0].z;
           if (f.t > 0.45) { endFight(f); continue; }
         }
-        f.gy += (groundAt(f.pos.x, f.pos.z) - f.gy) * Math.min(1, dt * 12);
-        f.pos.y = f.gy;
+        if (f.phase !== 'fly') f.gy += (groundAt(f.pos.x, f.pos.z) - f.gy) * Math.min(1, dt * 12);
+        f.pos.y = f.gy + (f.arcY || 0);
       }
     }
 
-    /* ---- boss patrol: every 60–120 s the PM strolls down the aisle and back ---- */
+    /* ---- boss teleport: the PM shrinks away in a puff and pops up at the spot (and back home) ---- */
+    var TP_T = 0.22, TP_LOOK = 1.8, POOF_LIFE = 0.6;
+    var poofs = [], poofI = 0, poofsLive = 0;
+    for (var pf0 = 0; pf0 < 2; pf0++) {   // two pools: the spot left and the spot arrived at
+      var pfMat = new THREE.MeshBasicMaterial({ color: 0xd9c8ff, transparent: true, opacity: 0, depthWrite: false });
+      var pfM = [];
+      for (var pf1 = 0; pf1 < 6; pf1++) { var pfm = new THREE.Mesh(G.puff, pfMat); pfm.visible = false; scene.add(pfm); pfM.push(pfm); }
+      poofs.push({ mat: pfMat, m: pfM, life: 0, x: 0, y: 0, z: 0 });
+    }
+    function poofAt(x, y, z) {
+      var p = poofs[poofI];
+      poofI = (poofI + 1) % poofs.length;
+      if (!p.life) poofsLive++;
+      p.life = POOF_LIFE; p.x = x; p.y = y; p.z = z;
+      for (var i = 0; i < p.m.length; i++) p.m[i].visible = true;
+    }
+    function updatePoofs(dt) {
+      for (var i = 0; i < poofs.length; i++) {
+        var p = poofs[i];
+        if (!p.life) continue;
+        p.life = Math.max(0, p.life - dt);
+        var k = 1 - p.life / POOF_LIFE;
+        p.mat.opacity = 0.85 * (1 - k);
+        for (var j = 0; j < p.m.length; j++) {
+          var ang = j / p.m.length * PI * 2 + k * 1.5, r = 0.15 + k * 0.45;
+          p.m[j].position.set(p.x + Math.cos(ang) * r, p.y + 0.3 + (j % 2) * 0.35 + k * 0.3, p.z + Math.sin(ang) * r);
+          p.m[j].scale.setScalar(1.2 + k * 2.2);
+        }
+        if (!p.life) { poofsLive--; for (var q = 0; q < p.m.length; q++) p.m[q].visible = false; }
+      }
+    }
+
+    /* ---- pantry: a desk that turns "done" teleports out for a coffee, back when its status changes ---- */
+    var PANTRY_AFTER = 2.5;   // s after turning done: the confetti / wave at the desk first
+    function startPantry(u, spot) {
+      var a = u.root.position;
+      var f = {
+        att: u, tgt: null, pantry: true, spot: spot, phase: 'stand', t: 0, n: 2, tpIdx: 0,
+        path: [new THREE.Vector3(a.x, 0, a.z), new THREE.Vector3(spot.x, 0, spot.z)],
+        pos: new THREE.Vector3(a.x + u.p.xOff, a.y, a.z), tgtPos: a.clone(), gy: a.y,
+        face: 0, sideT: 1, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 0, powX: 0, powY: 0
+      };
+      spot.u = u;
+      wake(u);
+      u.fight = f;
+      fights.push(f);
+    }
+    function updatePantry() {
+      if (!roomDims.W) return;
+      for (var i = 0; i < unitList.length; i++) {
+        var u = unitList[i];
+        if (u.status !== 'done' || u.dead || u.fight || u.zapBy || u.beatBy || T - u.doneAt < PANTRY_AFTER) continue;
+        var spot = null;
+        for (var j = 0; j < pantrySpots.length; j++) if (!pantrySpots[j].u) { spot = pantrySpots[j]; break; }
+        if (!spot) return;   // full: the rest keep waving at their desks
+        startPantry(u, spot);
+      }
+    }
+
+    /* ---- boss patrol: every 60–120 s the PM teleports to a few spots in the aisles, glares, and back ---- */
     var patrolAt = 60 + Math.random() * 60;
     var patrolFight = null;
     var PATROL_NEAR2 = 2.4 * 2.4;
 
     function startPatrol(pm) {
       var a = pm.root.position;
-      var W = roomDims.W, D = roomDims.D, zB = -D / 2, LW = roomDims.LW, zS = zB + LD - 0.5;
-      var stairTop = LW / 2 - 0.35, stairBot = LW / 2 + 1.85;
+      var W = roomDims.W, D = roomDims.D, zB = -D / 2;
       var zBack = zB + LD + 0.05;          // aisle behind the first row of chairs
       var zFront = D / 2 - 0.45;           // strip in front of the last row of desks
       var xL = -W / 2 + 0.8, xR = W / 2 - 0.8;
-      var onLoft = a.y > 0.5;
-      var pts = [[a.x, a.z], [a.x + 1, a.z + 0.05]];
-      if (onLoft) pts.push([stairTop, zS], [stairBot, zS]);
-      pts.push([onLoft ? stairBot : a.x + 1, zBack], [xL, zBack], [xL, zFront], [xR, zFront], [xR, zBack]);
-      if (onLoft) pts.push([stairBot, zBack], [stairBot, zS], [stairTop, zS]);
-      else pts.push([a.x + 1, zBack]);
-      pts.push([a.x + 1, a.z + 0.05], [a.x, a.z]);
+      // the boss teleports: seat, then 3 random stops along the two aisles (back / front, alternating)
+      var pts = [[a.x, a.z]];
+      var row0 = Math.random() < 0.5;
+      for (var h = 0; h < 3; h++) pts.push([xL + Math.random() * (xR - xL), (h % 2 === 0) === row0 ? zBack : zFront]);
       var f = {
-        att: pm, tgt: null, patrol: true, phase: 'stand', t: 0, idx: 0, n: pts.length,
+        att: pm, tgt: null, patrol: true, tpIdx: 0, phase: 'stand', t: 0, n: pts.length,
         path: pts.map(function (p) { return new THREE.Vector3(p[0], 0, p[1]); }),
         pos: new THREE.Vector3(a.x + pm.p.xOff, a.y, a.z), tgtPos: a.clone(), gy: a.y,
-        face: 0, wc: 0, sideA: 1, sideT: 1, pow: null, powT: 0, powI: 0,
-        slotX: null, slotZ: 0, delay: 0, punchDur: 0, powX: 0, powY: 0, speed: 1.5
+        face: 0, sideT: 1, pow: null, powT: 0, powI: 0,
+        slotX: null, slotZ: 0, delay: 0, punchDur: 0, powX: 0, powY: 0
       };
       wake(pm);
       pm.fight = f;
@@ -3115,7 +3371,7 @@
         patrolAt = T + 60 + Math.random() * 60;
         for (var i = 0; i < unitList.length; i++) {
           var c = unitList[i];
-          if (c.canon === 'PM' && !c.dead && !c.fight) { if (roomDims.W) patrolFight = startPatrol(c); break; }
+          if (c.canon === 'PM' && !c.dead && !c.fight && !c.beatBy) { if (roomDims.W) patrolFight = startPatrol(c); break; }
         }
       }
       var f = patrolFight;
@@ -3182,8 +3438,9 @@
       var pm = bossUnit();
       if (!pm) return 'No boss in the office';
       if (u.zapBy) return 'Already being zapped';
+      if (u.beatBy) return 'Busy fighting';
       if (zapFight) return 'The boss is already zapping someone';
-      if (pm.fight) return 'The boss is busy';
+      if (pm.fight || pm.beatBy) return 'The boss is busy';
       if (u.fight) return 'Busy fighting';
       if (!roomDims.W) return 'Not ready';
       return '';
@@ -3195,7 +3452,7 @@
       if (!f) return null;
       f.zap = true; f.zt = u; f.zapOn = false; f.arcT = 0;
       f.punchDur = ZAP_DUR; f.powX = 0.25; f.powY = 0.1;
-      f.say = kind === 'slow' ? '⚡ Faster!' : (kind === 'sleep' ? '⚡ Wake up!' : '⚡ Bzzt!');
+      f.say = kind === 'slow' ? '⚡ Faster!' : '⚡ Bzzt!';
       wake(pm);
       zapFight = f;
       return f;
@@ -3527,7 +3784,7 @@
       var y = Math.min(cy - r.top, r.height - menuEl.offsetHeight - 6);
       menuEl.style.left = Math.max(6, x) + 'px';
       menuEl.style.top = Math.max(6, y) + 'px';
-      var busy = !!(u.fight || u.zapBy);
+      var busy = !!(u.fight || u.zapBy || u.beatBy);
       punchBtn.disabled = busy;
       punchBtn.title = u.zapBy ? 'Being zapped' : (u.fight ? 'Already in a fight' : 'Punch');
       var nobody = !gangCandidates(u).length;
@@ -3628,10 +3885,10 @@
       if (!u) { endPick(); return; }
       if (u === pickAttacker) return;   // ignore self
       if (pickMode === 'paper') { var thrower = pickAttacker; endPick(); throwPaper(thrower, u); return; }
-      if (u.fight) return;              // someone already on the move can't be punched
+      if (u.fight || u.beatBy) return;  // someone already on the move / in a beating can't be punched
       var att = pickAttacker;
       endPick();
-      startFight(att, u);
+      startPunch(att, u);
     });
     cvs.addEventListener('pointercancel', function () { clearTimeout(longTimer); down = null; });
 
@@ -3679,10 +3936,12 @@
       clockTick += dt;
       if (clockTick > 1) { clockTick = 0; updateClock(); }
       updatePatrol();
+      updatePantry();
       if (fights.length) updateFights(dt);
       if (ballsLive) updateBalls(dt);
       if (confLive) updateConfetti(dt);
       if (zapFxLife > 0) updateZapFx(dt);
+      if (poofsLive) updatePoofs(dt);
       for (var j = 0; j < unitList.length; j++) animateUnit(unitList[j], T, dt);
       renderer.render(scene, camera);
       positionLabels();
@@ -3773,9 +4032,8 @@
 
     resize();
     start();
-    function isDozing(id) { var u = units[id]; return !!(u && !u.dead && u.dozing); }
     return { sync: sync, show: show, hide: hide, celebrate: celebrate, resetEffects: resetEffects,
-      tryZap: tryZap, isDozing: isDozing };
+      tryZap: tryZap };
   }
 
   /* ---- per-session view: #<session> in the URL shows only that coordinator's desks ---- */
@@ -3862,9 +4120,10 @@
     }
     updateSessionUi(desksIn);
     var shown = currentSession ? desksIn.filter(function (d) { return sessionOf(d) === currentSession; }) : desksIn;
+    var now = Date.now();
+    if (real) shown = hideDrinkers(shown, now);
     var desks = withPlaceholders(shown);
 
-    var now = Date.now();
     var roleCounts = { PM: 0, BA: 0, Dev: 0, QC: 0 };
 
     var ordered = desks.slice().sort(function (a, b) {
@@ -3875,7 +4134,7 @@
       var canon = canonicalRole(d.role);
       var idx = roleCounts[canon]++;
       var updated = d.updatedAt ? new Date(d.updatedAt).getTime() : now;
-      var isStale = (d.status !== 'idle' && d.status !== 'done') && (now - updated > STALE_MS);
+      var isStale = autoZapMin > 0 && (d.status !== 'idle' && d.status !== 'done') && (now - updated > autoZapMin * 60000);
       var entry = entryFor(canon, idx) || {};
       return Object.assign({}, d, {
         canon: canon,
@@ -3886,7 +4145,8 @@
         shirt: entry.shirt,
         hairStyle: entry.hairStyle,
         outburst: d.placeholder ? null : maybeOutburst(canon, d.status),
-        dozing: dozing2d(d, now)
+        dozing: dozing2d(d, now),
+        workMs: workingFor(d, now)
       });
     });
     var visible = {};
@@ -3894,6 +4154,61 @@
 
     lastItems = items;
     drawActive(fresh.filter(function (id) { return visible[id]; }));
+  }
+
+  // pantry: a "done" desk goes for a coffee; while that role has at least its default desk count
+  // working, it leaves after DRINK_MS at the pantry and is hidden (only on screen: the desk file stays).
+  // It shows again once its status changes.
+  var DRINK_MS = 10000, PANTRY_TRIP_MS = 3500;   // trip = wave at the desk + teleport (3D PANTRY_AFTER + blink)
+  var doneSince = {}, hiddenDone = {}, hideTimer = 0, hideAt = 0;
+  function hideDrinkers(list, now) {
+    var working = {};
+    list.forEach(function (d) {
+      var c = canonicalRole(d.role);
+      if (d.status === 'working') working[c] = (working[c] || 0) + 1;
+    });
+    var next = Infinity;
+    var out = list.filter(function (d) {
+      if (d.status !== 'done') { delete doneSince[d.id]; delete hiddenDone[d.id]; return true; }
+      if (!doneSince[d.id]) doneSince[d.id] = now;
+      if (hiddenDone[d.id]) return false;
+      var c = canonicalRole(d.role);
+      if ((working[c] || 0) < (defaultCounts[c] || 0)) return true;   // room to spare: stay at the pantry
+      var due = doneSince[d.id] + PANTRY_TRIP_MS + DRINK_MS;
+      if (now >= due) { hiddenDone[d.id] = true; return false; }
+      next = Math.min(next, due);
+      return true;
+    });
+    if (next < Infinity && (!hideTimer || next < hideAt)) {
+      clearTimeout(hideTimer);
+      hideAt = next;
+      hideTimer = setTimeout(function () { hideTimer = 0; render(currentDesks()); }, next - now + 30);
+    }
+    return out;
+  }
+
+  // working time: how long this desk has been "working" in a row, from the desk file's updatedAt when it
+  // turned working (so a reload keeps the count); later writes while still working don't reset it
+  var workingSince = {};
+  function workingFor(d, now) {
+    if (d.placeholder || d.status !== 'working') { delete workingSince[d.id]; return -1; }
+    if (!workingSince[d.id]) {
+      var u = d.updatedAt ? new Date(d.updatedAt).getTime() : now;
+      workingSince[d.id] = isNaN(u) || u > now ? now : u;
+    }
+    return now - workingSince[d.id];
+  }
+  function fmtWork(ms) {
+    var m = Math.floor(ms / 60000);
+    if (m < 1) return '<1m';
+    if (m < 60) return m + 'm';
+    var h = Math.floor(m / 60), r = m % 60;
+    return h + 'h' + (r < 10 ? '0' : '') + r;
+  }
+  function pillLabel(it) {
+    if (it.placeholder) return 'no work yet';
+    var st = it.stale ? 'stale' : (it.status || 'idle');
+    return it.workMs >= 0 ? st + ' · ' + fmtWork(it.workMs) : st;
   }
 
   // 2D: an idle desk nods off ~1.5 s after it became idle or after the last clapping ended;
@@ -4018,7 +4333,7 @@
     pill.className = 'status-pill';
     var dot = document.createElement('i');
     var label = document.createElement('span');
-    label.textContent = it.placeholder ? 'no work yet' : (it.stale ? 'stale' : (it.status || 'idle'));
+    label.textContent = pillLabel(it);
     pill.append(dot, label);
 
     var sceneEl = document.createElement('div');
@@ -4105,24 +4420,22 @@
   }
 
   /* ================================================================
-     auto zap: the boss zaps desks stuck on "working" for too long, and now and then a sleeper.
-     Purely visual — runtime memory + two localStorage settings, never written to the data source.
+     auto zap: the boss zaps desks stuck on "working" for too long.
+     The same "stale after N min" setting fades stale desks; in local mode it is also saved to
+     .agent-office/config.json (staleMinutes) so the PM's stale-desk hook uses it too.
      ================================================================ */
-  var AUTOZAP_KEY = 'agent-office-autozap-min', ZAP_SLEEPERS_KEY = 'agent-office-zap-sleepers';
+  var AUTOZAP_KEY = 'agent-office-autozap-min';
   var ZAP_COOLDOWN_MS = 5 * 60 * 1000, ZAP_CHECK_MS = 15000, ZAP_PUMP_MS = 3000, ZAP_2D_MS = 2000;
   var autoZapMin = (function () {
     try {
       var raw = localStorage.getItem(AUTOZAP_KEY);
-      var n = raw === null ? 10 : parseInt(raw, 10);
-      return isNaN(n) ? 10 : Math.max(0, Math.min(240, n));
-    } catch (e) { return 10; }
-  })();
-  var zapSleepers = (function () {
-    try { return localStorage.getItem(ZAP_SLEEPERS_KEY) !== '0'; } catch (e) { return true; }
+      var n = raw === null ? 15 : parseInt(raw, 10);
+      return isNaN(n) ? 15 : Math.max(0, Math.min(240, n));
+    } catch (e) { return 15; }
   })();
   var zapCooldown = {};   // desk id -> ms when it was last zapped
-  var zapQueue = [];      // [{ id, kind: 'slow' | 'sleep' }], one zap at a time
-  var zap2d = null, zap2dTimer = 0, sleeperTimer = 0;
+  var zapQueue = [];      // [{ id, kind: 'slow' }], one zap at a time
+  var zap2d = null, zap2dTimer = 0;
 
   function zapItem(id) {
     if (!lastItems) return null;
@@ -4135,11 +4448,6 @@
     var t = it.updatedAt ? Date.parse(it.updatedAt) : NaN;
     return !isNaN(t) && now - t > autoZapMin * 60000;
   }
-  function isSleeping(id) {
-    if (view === '3d') return !!(office3d && office3d.isDozing(id));
-    var it = zapItem(id);
-    return !!(it && it.dozing);
-  }
   function queueZap(id, kind) {
     for (var i = 0; i < zapQueue.length; i++) if (zapQueue[i].id === id) return;
     zapQueue.push({ id: id, kind: kind });
@@ -4147,13 +4455,13 @@
   function zapStillWanted(q, now) {
     var it = zapItem(q.id);
     if (!it || it.canon === 'PM' || onZapCooldown(q.id, now)) return false;
-    return q.kind === 'slow' ? isSlowWorker(it, now) : (zapSleepers && isSleeping(q.id));
+    return isSlowWorker(it, now);
   }
   function tryZap2d(id, kind, now) {
     if (zap2d && zap2d.until > now) return 'busy';
     var it = zapItem(id);
     if (!it) return 'gone';
-    zap2d = { id: id, until: now + ZAP_2D_MS, say: kind === 'sleep' ? '⚡ Wake up!' : '⚡ Faster!' };
+    zap2d = { id: id, until: now + ZAP_2D_MS, say: '⚡ Faster!' };
     if ((it.status || 'idle') === 'idle') idleSince[id] = zap2d.until;   // jolted awake, nods off again after
     clearTimeout(zap2dTimer);
     zap2dTimer = setTimeout(function () { zap2dTimer = 0; if (view === '2d') render(currentDesks()); }, ZAP_2D_MS + 30);
@@ -4179,20 +4487,6 @@
       if (isSlowWorker(it, now) && !onZapCooldown(it.id, now)) queueZap(it.id, 'slow');
     });
     pumpZap();
-  }
-  function zapRandomSleeper() {
-    if (!zapSleepers || !lastItems || document.hidden) return;
-    var now = Date.now(), pool = [];
-    lastItems.forEach(function (it) {
-      if (it.canon !== 'PM' && !onZapCooldown(it.id, now) && isSleeping(it.id)) pool.push(it.id);
-    });
-    if (!pool.length) return;
-    queueZap(pool[(Math.random() * pool.length) | 0], 'sleep');
-    pumpZap();
-  }
-  function scheduleSleeperZap() {
-    clearTimeout(sleeperTimer);
-    sleeperTimer = setTimeout(function () { zapRandomSleeper(); scheduleSleeperZap(); }, 45000 + Math.random() * 45000);
   }
   function resetZaps() {   // session / view switch: drop pending zaps and the 2D flash (cooldowns stay)
     zapQueue.length = 0;
@@ -4312,6 +4606,7 @@
 
   // Local mode: `node server.js` serves this page plus /api/events (SSE) and /api/desks (JSON).
   function subscribeLocal() {
+    loadStaleConfig();
     var gotData = false;
     var pollTimer = null;
     var loadTimer = setTimeout(function () {
@@ -4372,31 +4667,56 @@
   }
   renderNamesPanel();
 
-  // auto-zap settings (Team drawer)
+  // stale / auto-zap minutes (Team drawer): one setting for the fade, the auto zap and the PM hook
   var autoZapInput = document.getElementById('autozap-min-input');
+  var staleFromServer = false;   // local mode with a server that has /api/config
+  function setStaleMin(n, save) {
+    if (isNaN(n)) return;
+    autoZapMin = Math.max(0, Math.min(240, n));
+    if (autoZapInput) autoZapInput.value = autoZapMin;
+    try { localStorage.setItem(AUTOZAP_KEY, String(autoZapMin)); } catch (e) {}
+    if (save) saveConfig({ staleMinutes: autoZapMin });
+    render(currentDesks());
+  }
+  // "zap = remind the PM": only meaningful in local mode, where the PM's hook reads config.json
+  var REMIND_KEY = 'agent-office-zap-reminds';
+  var zapRemindInput = document.getElementById('zap-remind-input');
+  var zapReminds = (function () { try { return localStorage.getItem(REMIND_KEY) !== '0'; } catch (e) { return true; } })();
+  function setZapReminds(on, save) {
+    zapReminds = !!on;
+    if (zapRemindInput) zapRemindInput.checked = zapReminds;
+    try { localStorage.setItem(REMIND_KEY, zapReminds ? '1' : '0'); } catch (e) {}
+    if (save) saveConfig({ zapRemindsPm: zapReminds });
+  }
+  function saveConfig(patch) {
+    if (!staleFromServer || typeof fetch !== 'function') return;
+    fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch) }).catch(function () {});
+  }
+  function loadStaleConfig() {
+    if (typeof fetch !== 'function') return;
+    fetch('/api/config', { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (c) {
+        staleFromServer = true;
+        if (c && typeof c.staleMinutes === 'number') setStaleMin(c.staleMinutes, false);
+        if (c && typeof c.zapRemindsPm === 'boolean') setZapReminds(c.zapRemindsPm, false);
+      })
+      .catch(function () { /* older server or no server: the browser setting stays */ });
+  }
   if (autoZapInput) {
     autoZapInput.value = autoZapMin;
-    autoZapInput.addEventListener('change', function () {
-      var n = parseInt(autoZapInput.value, 10);
-      if (!isNaN(n)) autoZapMin = Math.max(0, Math.min(240, n));
-      autoZapInput.value = autoZapMin;
-      try { localStorage.setItem(AUTOZAP_KEY, String(autoZapMin)); } catch (e) {}
-    });
+    autoZapInput.addEventListener('change', function () { setStaleMin(parseInt(autoZapInput.value, 10), true); });
   }
-  var zapSleepersInput = document.getElementById('zap-sleepers-input');
-  if (zapSleepersInput) {
-    zapSleepersInput.checked = zapSleepers;
-    zapSleepersInput.addEventListener('change', function () {
-      zapSleepers = !!zapSleepersInput.checked;
-      try { localStorage.setItem(ZAP_SLEEPERS_KEY, zapSleepers ? '1' : '0'); } catch (e) {}
-    });
+  if (zapRemindInput) {
+    zapRemindInput.checked = zapReminds;
+    zapRemindInput.addEventListener('change', function () { setZapReminds(zapRemindInput.checked, true); });
   }
 
   render(EXAMPLE_DESKS);
   startData();
   setInterval(checkSlowWorkers, ZAP_CHECK_MS);
   setInterval(function () { if (zapQueue.length) pumpZap(); }, ZAP_PUMP_MS);
-  scheduleSleeperZap();
 
   // Re-render periodically: refreshes staleness fading and re-rolls bubble
   // text (real label vs. a censored outburst) — purely cosmetic, no db calls.
